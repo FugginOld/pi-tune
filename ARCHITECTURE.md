@@ -209,6 +209,49 @@ it cannot drift from it.
 6. **Detect is read-only.** `check_detect` and `check_why` run on every check on
    every invocation, including plain `--report` as an unprivileged user.
 
+## Verified on hardware
+
+A test proves the code does what it was written to do. Only a box proves it was
+the right thing to write. This records which is which, so the next session does
+not re-run what is settled or assume what is not.
+
+**pi3b-DNS1** — Pi 3B+, Debian trixie, root on a USB-attached SSD (`/dev/sda2`),
+Docker running, `wlan0` associated alongside `eth0`, no SDR. 2026-09-07.
+
+Exercised end to end:
+
+- Probe: `ROOT_MEDIA` derived and rendered on both the report and the checklist
+  header; `usb-autosuspend` gating on `ROOT_IS_USB` with `HAS_SDR` unset.
+- `cmdline_has` reading a token already present in `/boot/firmware/cmdline.txt`.
+- Apply on three checks (`journald-cap`, `idle-services`, `docker-log-caps`):
+  backup taken, `applied.list` written, health gate passed, `require_manual`
+  surfaced to the operator, rollback point printed.
+- Detect after apply: `journald-cap` reads its own drop-in back as `OK`.
+- Revert, both paths it can reach here: unit state restored to *exactly* the
+  prior state (`ModemManager` back to enabled **and** active, with both its
+  `multi-user.target.wants` link and its D-Bus alias recreated), and a file that
+  did not exist before the run deleted via `created.list` rather than left
+  behind empty.
+- TUI: review, checklist and confirm dialogs; the scroll flag passed only on
+  overflow, confirmed by its absence on a one-change review.
+
+Not verified, and not inferable from the above:
+
+- **`cmdline_add`'s write path.** This box already carries the token, so
+  `usb-autosuspend` short-circuits before writing. It is the one boot-critical
+  write in the repo and is covered only by tests against a temp file. Close it
+  on a board that lacks the token, not by removing it from one that boots over
+  USB to manufacture the case.
+- **Restoring a modified file from the `files/` mirror.** Both reverts here
+  removed a created file or reset unit state. Every check that edits a
+  pre-existing file (`root-noatime` on `/etc/fstab`, `usb-autosuspend`,
+  `docker-log-caps` merging into an existing `daemon.json`) reports `OK` or
+  `n/a` on this host, so the restore-original-bytes path has never run.
+- **Anything Pi 5.** `pcie-gen3` has never returned anything but `n/a`, and NVMe
+  root is inferred from that check existing rather than observed.
+- `wifi-powersave` and `root-noatime` applies. The first reloads NetworkManager,
+  which is in the guarded set; check which interface carries the session first.
+
 ## Accepted limitations
 
 - **Packages are never removed.** Revert undoes service state but leaves the
