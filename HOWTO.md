@@ -123,9 +123,34 @@ sudo ./pi-tune.sh --revert last      # undo the most recent run
 sudo ./pi-tune.sh --revert 20260906-141233
 ```
 
+Undo one tune out of a run rather than the whole thing:
+
+```sh
+sudo ./pi-tune.sh --revert 20260907-144725 --only docker-log-caps
+```
+
 Revert undoes service and package-state changes first, then restores every
 snapshotted file, then deletes files the run created. If the original run
 required a reboot, so does the revert.
+
+`--rollbacks` marks tunes already undone, so a point that still has something
+left in it is obvious:
+
+```
+  20260907-144725      journald-cap(reverted) wifi-powersave
+  20260906-141233      root-noatime [whole-run only]
+```
+
+`[whole-run only]` means a backup taken before per-module snapshots existed. It
+still reverts, but only in one piece — nothing in it recorded which tune wrote
+which file, so `--only` is refused rather than quietly undoing everything.
+
+**A file that changed after pi-tune touched it is left alone.** Revert compares
+each file against what the tune left behind; if it no longer matches, something
+else has edited it since and the file is skipped with a warning instead of being
+overwritten or deleted. You get a partial revert and a message saying which
+files, which is better than silently destroying an edit that was not ours. Read
+the warnings — the rest of the revert still ran.
 
 Backups live in `/var/backups/pi-tune/`, override with `PI_TUNE_BACKUP_ROOT`.
 They are never pruned; delete old timestamps by hand.

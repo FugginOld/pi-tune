@@ -89,13 +89,20 @@ file. `BACKUP_DIR` is pointed at the rollback point so modules can read back
 sidecars they wrote during apply (`idle-services` stores the unit list it
 disabled). Then, in order:
 
-1. `check_revert` for each id in `applied.list`.
-2. Restore every file under `<ts>/files/` to its mirrored absolute path.
-3. Delete every path in `created.list` — files that did not exist before.
-4. `rmdir` every path in `created.dirs`, deepest first.
+1. `check_revert` for each selected id.
+2. Restore every file under `modules/<id>/files/` to its mirrored absolute path.
+3. Delete every path in that module's `created.list`.
+4. `rmdir` every path in its `created.dirs`, deepest first.
 5. `systemctl daemon-reload`, and `sysctl --system` if any sysctl drop-in was
-   part of the run.
-6. `check_revert_post` for each id in `applied.list`.
+   part of the selection.
+6. `check_revert_post` for each selected id.
+7. Write `modules/<id>/reverted`, so `applied_index` stops reporting it `DONE`
+   and it is not offered for undo twice.
+
+The phases run **across** the selected modules, not one module end to end.
+Doing a module completely before starting the next would run its post hook — a
+reload — over another module's not-yet-restored config, which is the exact
+mistake the two-hook split exists to prevent.
 
 ### Why revert has two hooks
 
@@ -170,18 +177,45 @@ the two changes that trade heat and power for timing stability.
 
 ```text
 /var/backups/pi-tune/20260906-141233/
-├── manifest              host, model, pi-tune version
-├── applied.list          check ids, written before each attempt
-├── created.list          absolute paths that did not exist before the run
-├── created.dirs          directories install_file had to create, deepest first
-├── idle-services.list    module-private: units the idle-services check disabled
-└── files/                mirror of the original tree
-    └── etc/fstab
+├── manifest              host, model, pi-tune version, schema=2
+├── applied.list          check ids in apply order, written before each attempt
+└── modules/
+    └── root-noatime/
+        ├── files/            mirror of the originals THIS module overwrote
+        │   └── etc/fstab
+        ├── created.list      absolute paths that did not exist before
+        ├── created.dirs      directories install_file created, deepest first
+        ├── post.sha256       what the module left on disk
+        ├── reverted          written when this tune is undone
+        └── idle-services.list  module-private sidecars land here too
 ```
 
-`files/` mirrors absolute paths, so restore is a blind walk: for every file
-under `files/`, strip the prefix and `cp -a` it back. Nothing needs to know
-which module wrote it.
+`files/` still mirrors absolute paths, so restore is still a blind walk — it
+just starts one level down, inside the module that wrote them. Reverting one
+tune walks `modules/<id>/`; reverting a whole run walks its modules in reverse
+apply order.
+
+The per-module level exists because per-tune revert is exactly the requirement
+that something knows which module wrote what. It costs almost nothing in the
+apply path: `backup_file`, `record_absent`, `record_new_dirs` and every module
+sidecar resolve through `BACKUP_DIR`, so pointing it at `modules/<id>` around
+each `check_apply` files all of them correctly with **no change to any helper**.
+
+`post.sha256` is the guard the split makes necessary. Reverting tune A after a
+later tune B changed the same file would silently undo B. Nothing writes the
+same path twice today — `cmdline.txt` only from `usb-autosuspend`, `config.txt`
+only from `pcie-gen3`, everything else a private drop-in — so the hazard is
+latent, and per-tune revert is what makes it reachable. On revert, a file whose
+current hash does not match what the module left is **skipped with a warning**,
+never clobbered, on both the restore and the delete path. The delete path is the
+worse of the two: removing a file someone else has since edited destroys their
+work rather than ours. A partial revert the operator is told about beats a
+silent wrong one.
+
+**Schema 1 rollback points still exist and still revert.** A manifest with no
+`schema=2` line means the pre-2 layout — one `files/` tree at the run root, no
+record of which module wrote what — and takes the old whole-run walk.
+`--only` is refused there rather than silently reverting everything.
 
 Every write funnels through `install_file()`, which does the same three things
 in the same order every time: `record_absent` (so a new file can be deleted on

@@ -1,6 +1,7 @@
 # Plan — menu-driven TUI, four states, per-tune revert
 
-Status: **phase 1 done** (`aed6f0d`, verified on pi3b-DNS1). Written 2026-09-07
+Status: **phases 1-2 done** (`aed6f0d`, and phase 2 pending its box check).
+Written 2026-09-07
 against `201f09c`.
 
 Execute phases in order. Each phase ends green: `shellcheck -x -s bash pi-tune.sh

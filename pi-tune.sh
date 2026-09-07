@@ -186,7 +186,10 @@ new_backup_dir() {
     BACKUP_DIR="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
     if [[ $DRY_RUN -eq 0 ]]; then
         mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
-        printf 'host=%s\nmodel=%s\nversion=%s\n' "$(hostname)" "$PI_MODEL" "$PI_TUNE_VERSION" \
+        # schema=2 means per-module subtrees under modules/. Its absence means
+        # a pre-2 run with one files/ tree at the root, which reverts whole.
+        printf 'host=%s\nmodel=%s\nversion=%s\nschema=2\n' \
+            "$(hostname)" "$PI_MODEL" "$PI_TUNE_VERSION" \
             > "$BACKUP_DIR/manifest"
     fi
 }
@@ -284,16 +287,24 @@ do_apply() {
     new_backup_dir
     health_snapshot
 
-    local id idx rc applied=()
+    local id idx rc applied=() run_dir=$BACKUP_DIR
     for id in "${chosen[@]}"; do
         idx=$(index_of "$id") || continue
         info "applying $id — ${C_TITLE[$idx]}"
         load_check "${C_FILE[$idx]}" || continue
         # Recorded before the attempt: a module that fails halfway through has
         # still touched the system and must be reachable by --revert.
-        [[ $DRY_RUN -eq 0 ]] && printf '%s\n' "$id" >> "$BACKUP_DIR/applied.list"
+        [[ $DRY_RUN -eq 0 ]] && printf '%s\n' "$id" >> "$run_dir/applied.list"
+        # backup_file, record_absent, record_new_dirs and every module sidecar
+        # resolve through BACKUP_DIR. Pointing it at this module's own subtree
+        # files all of them there with no change to any of those helpers - and
+        # is what makes reverting one tune without the others possible at all.
+        BACKUP_DIR="$run_dir/modules/$id"
+        [[ $DRY_RUN -eq 0 ]] && mkdir -p "$BACKUP_DIR"
         rc=0
         check_apply || rc=$?
+        [[ $DRY_RUN -eq 0 ]] && record_post_hashes
+        BACKUP_DIR=$run_dir
         if [[ $rc -eq 0 ]]; then
             applied+=("$id")
         else
@@ -331,6 +342,51 @@ do_apply() {
 
 # --- revert -----------------------------------------------------------------
 
+# record_post_hashes — what this module left on disk, hashed, so a later
+# per-tune revert can tell "nothing has touched this since" from "something
+# has". The paths are the ones the module actually wrote: whatever it
+# overwrote (mirrored under files/) plus whatever it created (created.list).
+record_post_hashes() {
+    local src dest
+    [[ -n ${BACKUP_DIR:-} && -d $BACKUP_DIR ]] || return 0
+    : > "$BACKUP_DIR/post.sha256"
+    if [[ -d "$BACKUP_DIR/files" ]]; then
+        while IFS= read -r -d '' src; do
+            dest="${src#"$BACKUP_DIR/files"}"
+            [[ -f $dest ]] && sha256sum "$dest" >> "$BACKUP_DIR/post.sha256"
+        done < <(find "$BACKUP_DIR/files" -type f -print0 2>/dev/null)
+    fi
+    if [[ -f "$BACKUP_DIR/created.list" ]]; then
+        while read -r dest; do
+            [[ -n $dest && -f $dest ]] && sha256sum "$dest" >> "$BACKUP_DIR/post.sha256"
+        done < "$BACKUP_DIR/created.list"
+    fi
+    return 0
+}
+
+# _post_hash <moddir> <dest> — what we left at that path, or rc 1 if unrecorded.
+# sha256sum prints a 64-char hash, two spaces, then the path.
+_post_hash() {
+    local line
+    [[ -f "$1/post.sha256" ]] || return 1
+    while IFS= read -r line; do
+        [[ ${line:66} == "$2" ]] && { printf '%s' "${line:0:64}"; return 0; }
+    done < "$1/post.sha256"
+    return 1
+}
+
+# _drifted <moddir> <dest> — has anything changed this file since we applied it?
+# Per-tune revert is what makes this reachable: restoring blindly would undo a
+# later change pi-tune did not make. An unrecorded path means we cannot tell,
+# and the old restore-anyway behaviour stands rather than silently skipping.
+_drifted() {
+    local want now
+    want=$(_post_hash "$1" "$2") || return 1
+    [[ -f $2 ]] || return 1
+    now=$(sha256sum "$2" | cut -c1-64)
+    [[ $now != "$want" ]]
+}
+
 # revert_hooks <dir> <hook> — run one revert hook for every id in applied.list,
 # re-sourcing its module first so the hook comes from the right file.
 revert_hooks() {
@@ -345,16 +401,25 @@ revert_hooks() {
     done < "$dir/applied.list"
 }
 
-do_revert() {
-    local ts=$1 dir
-    if [[ $ts == last ]]; then
-        dir=$(find "$BACKUP_ROOT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort | tail -n1)
-    else
-        dir="$BACKUP_ROOT/$ts"
-    fi
-    [[ -n $dir && -d $dir ]] || die "no such rollback point: $ts"
+# _revert_hook <id> <hook> — one revert hook, from the right module file.
+_revert_hook() {
+    local idx
+    idx=$(index_of "$1") || return 0
+    load_check "${C_FILE[$idx]}" || return 0
+    dbg "$2: $1"
+    "$2" || warn "$1 $2 failed"
+}
 
-    info "reverting from $dir"
+# _revert_v1 <dir> — pre-schema-2 layout: one files/ tree at the run root and no
+# record of which module wrote what, so it can only be undone whole. Three of
+# these exist on pi3b-DNS1 and one is live; this path stays for them.
+_revert_v1() {
+    local dir=$1
+    # Modules that stashed a sidecar during apply (idle-services writes the
+    # unit list it disabled) read it back through BACKUP_DIR. Without this the
+    # path resolves to /<name> and the hook silently finds nothing.
+    BACKUP_DIR="$dir"
+
 
     # Modules that stashed a sidecar during apply (idle-services writes the
     # unit list it disabled) read it back through BACKUP_DIR. Without this the
@@ -409,17 +474,141 @@ do_revert() {
     #    NetworkManager. Running these in step 1 would have them pick up the
     #    very config we are removing.
     revert_hooks "$dir" check_revert_post
+}
+
+# _revert_v2 <dir> [id...] — per-module layout. With no ids, undoes the whole
+# run; with ids, only those tunes. Either way the phase order from v1 is kept:
+# every pre hook, then every restore, then the reload, then every post hook.
+# Doing one module end to end instead would run its post hook - a reload - over
+# another module's not-yet-restored config.
+_revert_v2() {
+    local dir=$1; shift
+    local -a want=("$@") ids=() sel=()
+    local id m w hit
+
+    # applied.list is apply order; undo in reverse.
+    while read -r id; do
+        [[ -n $id ]] && ids=("$id" ${ids[@]+"${ids[@]}"})
+    done < "$dir/applied.list"
+
+    for id in ${ids[@]+"${ids[@]}"}; do
+        m="$dir/modules/$id"
+        [[ -d $m ]] || { warn "$id has no per-module backup here"; continue; }
+        [[ -e "$m/reverted" ]] && { info "$id already reverted"; continue; }
+        if [[ ${#want[@]} -gt 0 ]]; then
+            hit=0
+            for w in "${want[@]}"; do [[ $w == "$id" ]] && hit=1; done
+            [[ $hit -eq 1 ]] || continue
+        fi
+        sel+=("$id")
+    done
+    [[ ${#sel[@]} -gt 0 ]] || { warn "nothing to revert"; return 0; }
+
+    # 1. undo that needs the applied config still on disk.
+    for id in "${sel[@]}"; do
+        BACKUP_DIR="$dir/modules/$id"
+        _revert_hook "$id" check_revert
+    done
+
+    # 2. restore, delete, rmdir — each module out of its own subtree.
+    local src dest pth d
+    for id in "${sel[@]}"; do
+        m="$dir/modules/$id"
+        if [[ -d "$m/files" ]]; then
+            while IFS= read -r -d '' src; do
+                dest="${src#"$m/files"}"
+                if _drifted "$m" "$dest"; then
+                    warn "$dest changed since $id was applied — left as it is"
+                    continue
+                fi
+                info "restoring $dest"
+                mkdir -p "$(dirname "$dest")"
+                cp -a "$src" "$dest" || warn "could not restore $dest"
+            done < <(find "$m/files" -type f -print0)
+        fi
+        if [[ -f "$m/created.list" ]]; then
+            while read -r pth; do
+                [[ -n $pth && -e $pth ]] || continue
+                if _drifted "$m" "$pth"; then
+                    warn "$pth changed since $id was applied — left as it is"
+                    continue
+                fi
+                info "removing $pth"
+                rm -f "$pth"
+            done < "$m/created.list"
+        fi
+        if [[ -f "$m/created.dirs" ]]; then
+            while read -r d; do
+                [[ -n $d && -d $d ]] || continue
+                rmdir "$d" 2>/dev/null && info "removing empty $d"
+            done < "$m/created.dirs"
+        fi
+    done
+
+    # 3. the on-disk state is the original again; re-read it once for the batch.
+    run systemctl daemon-reload
+    for id in "${sel[@]}"; do
+        if compgen -G "$dir/modules/$id/files/etc/sysctl.d/*" >/dev/null 2>&1; then
+            run sysctl --quiet --system
+            break
+        fi
+    done
+
+    # 4. undo that needs the ORIGINAL config back on disk.
+    for id in "${sel[@]}"; do
+        BACKUP_DIR="$dir/modules/$id"
+        _revert_hook "$id" check_revert_post
+    done
+
+    # 5. mark, so DONE stops claiming them and they are not offered again.
+    for id in "${sel[@]}"; do
+        date +%Y%m%d-%H%M%S > "$dir/modules/$id/reverted"
+    done
+}
+
+# do_revert <ts|last> [id...] — ids revert single tunes, and only on schema 2.
+do_revert() {
+    local ts=$1; shift
+    local -a want=("$@")
+    local dir
+    if [[ $ts == last ]]; then
+        dir=$(find "$BACKUP_ROOT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort | tail -n1)
+    else
+        dir="$BACKUP_ROOT/$ts"
+    fi
+    [[ -n $dir && -d $dir ]] || die "no such rollback point: $ts"
+
+    info "reverting from $dir"
+
+    if grep -qs '^schema=2$' "$dir/manifest"; then
+        _revert_v2 "$dir" ${want[@]+"${want[@]}"}
+    else
+        [[ ${#want[@]} -eq 0 ]] ||             die "$(basename "$dir") predates per-module backups and can only be reverted whole"
+        _revert_v1 "$dir"
+    fi
 
     info "revert complete — reboot if the original run required one"
 }
 
 list_rollbacks() {
-    local d applied
+    local d id applied
     printf '\nRollback points in %s:\n\n' "$BACKUP_ROOT"
     while IFS= read -r d; do
         [[ -n $d ]] || continue
         applied=""
-        [[ -f "$d/applied.list" ]] && applied=$(tr '\n' ' ' < "$d/applied.list")
+        if [[ -f "$d/applied.list" ]]; then
+            # Now that one tune can be reverted out of a run, listing an
+            # already-undone one as still revertable would be a lie.
+            while read -r id; do
+                [[ -n $id ]] || continue
+                if [[ -e "$d/modules/$id/reverted" ]]; then
+                    applied+="$id(reverted) "
+                else
+                    applied+="$id "
+                fi
+            done < "$d/applied.list"
+        fi
+        grep -qs '^schema=2$' "$d/manifest" || applied+="[whole-run only]"
         printf '  %-20s %s\n' "$(basename "$d")" "$applied"
     done < <(find "$BACKUP_ROOT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
     printf '\n'
@@ -450,7 +639,7 @@ pi-tune $PI_TUNE_VERSION — Raspberry Pi optimization auditor
   --apply             Audit, then offer a checklist of changes
   --dry-run           With --apply: show diffs and commands, write nothing
   --yes               Non-interactive; apply all low-risk items
-  --revert TS|last    Roll back a previous run
+  --revert TS|last    Roll back a run; --only narrows it to single tunes
   --rollbacks         List available rollback points
   --list              List all known checks and exit
   --only ID[,ID...]   Restrict to specific check IDs
@@ -514,7 +703,12 @@ main() {
             ;;
         revert)
             [[ $EUID -eq 0 ]] || die "revert needs root"
-            do_revert "$REVERT_TS"
+            # --only narrows a revert to single tunes, the same way it narrows
+            # an apply. scan_checks has already been filtered by it, so the
+            # registry holds exactly the modules whose hooks should run.
+            local -a rids=()
+            [[ -n $ONLY ]] && IFS=',' read -ra rids <<< "$ONLY"
+            do_revert "$REVERT_TS" ${rids[@]+"${rids[@]}"}
             ;;
         apply)
             [[ $EUID -eq 0 || $DRY_RUN -eq 1 ]] || die "--apply needs root (or use --dry-run)"
