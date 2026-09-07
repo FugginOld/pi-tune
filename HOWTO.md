@@ -194,7 +194,8 @@ helper set and the rules about module-private state.
 Before opening a PR:
 
 ```sh
-shellcheck -x -s bash pi-tune.sh lib/*.sh checks/*.sh
+shellcheck -x -s bash pi-tune.sh lib/*.sh checks/*.sh tests/*.sh
+./tests/run.sh
 ./pi-tune.sh --list
 ./pi-tune.sh --report --no-tui
 sudo ./pi-tune.sh --apply --dry-run --only <your-id>
@@ -202,3 +203,32 @@ sudo ./pi-tune.sh --apply --dry-run --only <your-id>
 
 The last one is the important one: it must print the diff you expect and write
 nothing.
+
+## Tests
+
+`./tests/run.sh` runs every `tests/pt-*.sh` against the repo and prints one line
+per file. They need no root, no Pi, and no network — each sources the real
+`lib/*.sh` and `checks/*.sh` and drives it with stub globals, so what is asserted
+is the shipped code rather than a restatement of it. On success you get counts;
+a failing file prints its full output, because that is the run where the
+rendered screens are evidence rather than noise.
+
+There is no framework and no fixture tree. A test is a bash script taking the
+repo root as `$1`, printing `ok <name>` or `FAIL <name>: got X want Y`, and
+exiting nonzero if any assertion failed. `run.sh` needs nothing else from it.
+
+Two rules earn their keep here:
+
+- **Prove the assertion can fail.** Several tests carry an explicit
+  discrimination check — `pt-ui.sh` re-runs the pre-fix implementation and
+  asserts it *fails* the same assertion. When you add a check, break the code it
+  covers and confirm the suite goes red before trusting it green.
+- **Extract, don't copy.** `pt-media.sh` pulls the `ROOT_MEDIA` case statement
+  out of `lib/probe.sh` with `sed` and `eval`s it, rather than keeping a second
+  copy beside a guard. A copy needs a drift guard, and the obvious guard —
+  counting the `ROOT_MEDIA=` lines — still passes when a medium is *renamed*,
+  which is the one drift worth catching.
+
+`tests/.shellcheckrc` relaxes a handful of checks that are correct for the tool
+and wrong for a harness that sources it. It applies to `tests/` only; the tool's
+own sources are still linted with the full default set.

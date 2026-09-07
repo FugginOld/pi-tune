@@ -1,0 +1,30 @@
+# Applies to tests/ only. These tests source the real lib/*.sh and checks/*.sh
+# and drive them with stub globals, which trips several checks that are correct
+# advice for the tool itself and wrong for a harness around it. Disabled here
+# rather than with per-line directives, because every one of them fires on most
+# of the seven files.
+#
+# The tool's own sources are still linted with the full default set - this file
+# does not reach pi-tune.sh, lib/ or checks/.
+
+# Stub globals (DRY_RUN, ROOT_SRC, CRITICAL_UNITS...) are assigned here and read
+# only by the code being sourced, so shellcheck cannot see the use.
+disable=SC2034
+
+# The file under test is chosen at runtime: `. "$drv"`, `. "./$drv"`.
+disable=SC1090
+
+# Stub overrides (unit_active, got) are called by the sourced code, not directly.
+disable=SC2329
+
+# pt-header.sh holds pi-tune.sh's header format in a variable on purpose, so it
+# can assert that exact string is still present in the script. That is the point
+# of the test, and it requires a variable in the printf format position.
+disable=SC2059
+
+# pt-media.sh asserts a literal '${ROOT_MEDIA' never survives into rendered
+# text, which requires writing it unexpanded.
+disable=SC2016
+
+# Style-only, in throwaway diagnostic output that runs on failure.
+disable=SC2001,SC2012
