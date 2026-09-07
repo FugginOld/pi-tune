@@ -26,12 +26,20 @@ check_why() {
     echo "Running or enabled with nothing to do here: ${list% }"
 }
 
+# A candidate can be enabled-but-stopped, or running-but-not-enabled (started
+# by hand). Record both bits so revert restores that exact state instead of
+# flattening everything to "enabled and running".
 check_apply() {
     local u any=0
     while read -r u; do
         [[ -n $u ]] || continue
         any=1
-        [[ $DRY_RUN -eq 0 && -n ${BACKUP_DIR:-} ]] && printf '%s\n' "$u" >> "$BACKUP_DIR/idle-services.list"
+        if [[ $DRY_RUN -eq 0 && -n ${BACKUP_DIR:-} ]]; then
+            printf '%s %s %s\n' "$u" \
+                "$(unit_enabled "$u" && echo enabled || echo disabled)" \
+                "$(unit_active  "$u" && echo active  || echo inactive)" \
+                >> "$BACKUP_DIR/idle-services.list"
+        fi
         run systemctl disable --now "$u"
     done < <(_found)
     [[ $any -eq 1 ]] || info "nothing to disable"
@@ -39,10 +47,18 @@ check_apply() {
 }
 
 check_revert() {
-    local f="${BACKUP_DIR:-}/idle-services.list" u
+    local f="${BACKUP_DIR:-}/idle-services.list" u en act
     [[ -f $f ]] || return 0
-    while read -r u; do
-        [[ -n $u ]] && run systemctl enable --now "$u"
+    while read -r u en act; do
+        [[ -n $u ]] || continue
+        # Rollback points written before the state was recorded hold a bare
+        # unit name; enable --now is what wrote them, so it is what undoes them.
+        if [[ -z $en ]]; then
+            run systemctl enable --now "$u"
+            continue
+        fi
+        [[ $en == enabled ]] && run systemctl enable "$u"
+        [[ $act == active ]] && run systemctl start "$u"
     done < "$f"
     return 0
 }
