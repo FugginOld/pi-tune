@@ -241,6 +241,15 @@ Exercised end to end:
   behind empty.
 - TUI: review, checklist and confirm dialogs; the scroll flag passed only on
   overflow, confirmed by its absence on a one-change review.
+- Four states (plan phase 1), on the pair that makes them distinguishable:
+  `journald-cap` reads `DONE` because pi-tune capped it, `root-noatime` reads
+  `OK` because the image already mounts that way. A three-state design would
+  have shown both as the same thing.
+- `applied_index` needs no root: `/var/backups/pi-tune` is readable by the
+  invoking user, so `DONE` survives an unprivileged `--report`.
+- The unprivileged degradation in `docker-log-caps`' `check_why` — with
+  `/var/lib/docker/containers` unreadable at `0710`, the size parenthetical is
+  dropped whole rather than printed empty. Previously only asserted in tests.
 
 Not verified, and not inferable from the above:
 
