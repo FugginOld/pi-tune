@@ -71,18 +71,41 @@ report, then `do_apply`:
 
 **Revert** (`--revert TS|last`, root):
 `scan_checks` runs first — revert needs the registry to map an id back to a
-file. Then, in order:
+file. `BACKUP_DIR` is pointed at the rollback point so modules can read back
+sidecars they wrote during apply (`idle-services` stores the unit list it
+disabled). Then, in order:
 
-1. `check_revert` for each id in `applied.list` — services, packages, and other
-   non-file state, undone while the files are still in their applied form.
+1. `check_revert` for each id in `applied.list`.
 2. Restore every file under `<ts>/files/` to its mirrored absolute path.
 3. Delete every path in `created.list` — files that did not exist before.
-4. `systemctl daemon-reload`, and `sysctl --system` if any sysctl drop-in was
+4. `rmdir` every path in `created.dirs`, deepest first.
+5. `systemctl daemon-reload`, and `sysctl --system` if any sysctl drop-in was
    part of the run.
+6. `check_revert_post` for each id in `applied.list`.
 
-Hooks run before file restores because a hook such as
-`systemctl disable --now zramswap.service` needs the config it was started with
-still on disk.
+### Why revert has two hooks
+
+Undo work splits by which side of the file restore it has to happen on, and a
+module that guesses wrong reports success while leaving the change in force.
+
+`check_revert` runs **before** restore, for anything that needs the applied
+config still on disk — `systemctl disable --now pi-tune-governor.service` can
+only stop a unit whose unit file has not been deleted yet.
+
+`check_revert_post` runs **after** restore, for anything whose whole purpose is
+to make a running service notice that the config changed. `journald-cap`
+restarts journald; in the pre hook it would reload the very cap being removed
+and hold it until the next restart. `root-noatime` remounts `/`; in the pre
+hook it would re-read the noatime fstab mid-revert. `wifi-powersave` needs
+both: the pre hook disables its own unit, the post hook reloads NetworkManager
+once the drop-in is gone.
+
+The rule of thumb: **stopping** something goes in `check_revert`, **reloading**
+something goes in `check_revert_post`.
+
+Step 4 uses `rmdir`, not `rm -r`. A directory `install_file` created but that
+someone else has since put a file in is left alone — pi-tune only ever removes
+a directory it made and that is still empty.
 
 ## Probe
 
@@ -135,6 +158,7 @@ the two changes that trade heat and power for timing stability.
 ├── manifest              host, model, pi-tune version
 ├── applied.list          check ids, written before each attempt
 ├── created.list          absolute paths that did not exist before the run
+├── created.dirs          directories install_file had to create, deepest first
 ├── idle-services.list    module-private: units the idle-services check disabled
 └── files/                mirror of the original tree
     └── etc/fstab

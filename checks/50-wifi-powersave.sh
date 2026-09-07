@@ -53,8 +53,15 @@ EOF
     return 0
 }
 
+# Disabling our unit needs its unit file still present, so it stays here.
 check_revert() {
     unit_exists pi-tune-wifi-powersave.service && run systemctl disable --now pi-tune-wifi-powersave.service
+    return 0
+}
+
+# The NetworkManager reload has to come after our conf.d drop-in is deleted,
+# otherwise NM re-reads powersave=2 and holds it.
+check_revert_post() {
     [[ $HAS_NM -eq 1 ]] && run systemctl reload NetworkManager.service
     return 0
 }

@@ -73,6 +73,23 @@ record_absent() {
     printf '%s\n' "$p" >> "$BACKUP_DIR/created.list"
 }
 
+# record_new_dirs <path> — note the directories that do not exist yet but will
+# be created to hold <path>, so revert can rmdir the ones we made. Recorded
+# deepest-first, which is the order revert has to remove them in.
+record_new_dirs() {
+    local d; d=$(dirname "$1")
+    [[ -n $BACKUP_DIR ]] || return 0
+    [[ $DRY_RUN -eq 1 ]] && return 0
+    local -a new=()
+    while [[ -n $d && $d != / && $d != . && ! -d $d ]]; do
+        new+=("$d")
+        d=$(dirname "$d")
+    done
+    [[ ${#new[@]} -eq 0 ]] && return 0
+    mkdir -p "$BACKUP_DIR"
+    printf '%s\n' "${new[@]}" >> "$BACKUP_DIR/created.dirs"
+}
+
 # install_file <src> <dest> [mode] — back up dest, then replace it with src.
 # Under --dry-run this prints a unified diff instead, which doubles as the
 # preview mechanism.
@@ -92,6 +109,7 @@ install_file() {
     fi
 
     record_absent "$dest"
+    record_new_dirs "$dest"
     backup_file "$dest" || { err "backup of $dest failed; refusing to write"; rm -f "$src"; return 1; }
     mkdir -p "$(dirname "$dest")"
     cat "$src" > "$dest" || { rm -f "$src"; return 1; }

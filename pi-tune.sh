@@ -39,12 +39,13 @@ declare -a C_ID=() C_TITLE=() C_RISK=() C_FILE=() C_WHY=() C_STATE=()
 # reset first so a module that omits one can't inherit the previous module's.
 load_check() {
     local f=$1
-    unset -f check_detect check_why check_apply check_revert
+    unset -f check_detect check_why check_apply check_revert check_revert_post
     CHECK_ID=""; CHECK_TITLE=""; CHECK_RISK="medium"
     check_detect() { return 2; }
     check_why()    { echo "(no rationale provided)"; }
     check_apply()  { return 1; }
-    check_revert() { return 0; }
+    check_revert()      { return 0; }
+    check_revert_post() { return 0; }
     # shellcheck disable=SC1090
     . "$f" || { warn "failed to source $f"; return 1; }
     [[ -n $CHECK_ID ]] || { warn "$f: missing CHECK_ID"; return 1; }
@@ -238,6 +239,20 @@ do_apply() {
 
 # --- revert -----------------------------------------------------------------
 
+# revert_hooks <dir> <hook> — run one revert hook for every id in applied.list,
+# re-sourcing its module first so the hook comes from the right file.
+revert_hooks() {
+    local dir=$1 hook=$2 id idx
+    [[ -f "$dir/applied.list" ]] || return 0
+    while read -r id; do
+        [[ -n $id ]] || continue
+        idx=$(index_of "$id") || continue
+        load_check "${C_FILE[$idx]}" || continue
+        dbg "$hook: $id"
+        "$hook" || warn "$id $hook failed"
+    done < "$dir/applied.list"
+}
+
 do_revert() {
     local ts=$1 dir
     if [[ $ts == last ]]; then
@@ -249,17 +264,14 @@ do_revert() {
 
     info "reverting from $dir"
 
-    # 1. module-level undo (services, packages) before files go back.
-    if [[ -f "$dir/applied.list" ]]; then
-        local id idx
-        while read -r id; do
-            [[ -n $id ]] || continue
-            idx=$(index_of "$id") || continue
-            load_check "${C_FILE[$idx]}" || continue
-            dbg "revert hook: $id"
-            check_revert || warn "$id revert hook failed"
-        done < "$dir/applied.list"
-    fi
+    # Modules that stashed a sidecar during apply (idle-services writes the
+    # unit list it disabled) read it back through BACKUP_DIR. Without this the
+    # path resolves to /<name> and the hook silently finds nothing.
+    BACKUP_DIR="$dir"
+
+    # 1. module-level undo that needs the applied config still on disk —
+    #    disabling a unit whose unit file we are about to delete, for one.
+    revert_hooks "$dir" check_revert
 
     # 2. restore every snapshotted file to its original path.
     if [[ -d "$dir/files" ]]; then
@@ -282,10 +294,30 @@ do_revert() {
         done < "$dir/created.list"
     fi
 
+    # 4. remove directories we created, deepest first. rmdir refuses to touch
+    #    a directory anything else has since put a file in, which is the
+    #    behaviour we want — never rm -rf a path we only partly own.
+    if [[ -f "$dir/created.dirs" ]]; then
+        local d
+        while read -r d; do
+            [[ -n $d && -d $d ]] || continue
+            rmdir "$d" 2>/dev/null && info "removing empty $d"
+        done < "$dir/created.dirs"
+    fi
+
+    # 5. the on-disk state is now the original, so re-read it before the hooks
+    #    that exist to make a running service notice.
     run systemctl daemon-reload
     if compgen -G "$dir/files/etc/sysctl.d/*" >/dev/null 2>&1; then
         run sysctl --quiet --system
     fi
+
+    # 6. module-level undo that needs the ORIGINAL config back on disk —
+    #    restarting journald, remounting / from the restored fstab, reloading
+    #    NetworkManager. Running these in step 1 would have them pick up the
+    #    very config we are removing.
+    revert_hooks "$dir" check_revert_post
+
     info "revert complete — reboot if the original run required one"
 }
 

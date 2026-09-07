@@ -44,4 +44,6 @@ check_apply() {
     return 0
 }
 
-check_revert() { run mount -o remount /; }
+# Remount only once the original fstab is back on disk; in check_revert it
+# would re-read the noatime fstab we are in the middle of reverting.
+check_revert_post() { run mount -o remount /; }

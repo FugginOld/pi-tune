@@ -35,4 +35,6 @@ EOF
     run systemctl restart systemd-journald
 }
 
-check_revert() { run systemctl restart systemd-journald; }
+# The restart has to happen after the drop-in is gone, or journald reloads
+# the very cap we are removing and keeps it until its next restart.
+check_revert_post() { run systemctl restart systemd-journald; }

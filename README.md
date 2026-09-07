@@ -83,15 +83,28 @@ check_apply()  { write_drop_in /etc/foo.conf <<'EOF'
 setting=value
 EOF
 }
-check_revert() { return 0; }   # only for non-file state: services, packages
+
+check_revert()      { return 0; }   # before files are restored: stop things
+check_revert_post() { return 0; }   # after files are restored: reload things
 ```
 
 Return `2` liberally. A check that can't positively confirm the condition should
 declare itself inapplicable rather than act on an assumption.
 
-File restores are automatic, so `check_revert` only needs to handle things that
-aren't files — a service you enabled, a package you installed. Use the helpers
-in `lib/util.sh` (`install_file`, `write_drop_in`, `sysctl_drop_in`,
+File restores are automatic, so the revert hooks only handle things that aren't
+files — a service you enabled, a package you installed. Which of the two you
+want depends on the side of the restore your work has to happen on:
+
+- `check_revert` runs **before** files go back. Use it to *stop* something that
+  still needs its config on disk — `systemctl disable --now` on a unit whose
+  unit file is about to be deleted.
+- `check_revert_post` runs **after** files are back. Use it to *reload*
+  something so it notices the reverted config — restarting journald, remounting
+  `/`, reloading NetworkManager. Doing this in `check_revert` re-reads the very
+  config you are removing and silently keeps it.
+
+Getting this backwards is the one mistake here that reports success and changes
+nothing. Use the helpers in `lib/util.sh` (`install_file`, `write_drop_in`, `sysctl_drop_in`,
 `config_txt_set`, `cmdline_add`, `pkg_install`, `run`) rather than raw
 redirection: they carry the backup, dry-run, and rollback plumbing.
 
