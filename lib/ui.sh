@@ -35,6 +35,15 @@ ui_available() { [[ -n $UI_BIN ]]; }
 ui_msgbox() {
     local title=$1 text=$2
     if ui_available; then
+        # Verified on a Pi 3B+: the text scrolls, and neither --msgbox nor
+        # --textbox draws a bar to say so. So overflow is reachable but silent -
+        # the review screen read as truncated mid-sentence when it was only
+        # scrolled to the top. Say it in the title, which stays visible and,
+        # unlike a first line of body text, does not push the content down.
+        # 22 lines of box less title, borders and button leaves ~16 for text,
+        # wrapped to the 78-column box less its margins.
+        [[ $(printf '%b\n' "$text" | fold -s -w 74 | wc -l) -gt 16 ]] &&
+            title="$title — PgDn for more"
         "$UI_BIN" --title "$title" "${UI_SCROLL[@]}" --msgbox "$text" 22 78
     else
         printf '\n%b\n\n' "$text"

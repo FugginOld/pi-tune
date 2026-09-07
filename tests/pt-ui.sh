@@ -63,4 +63,31 @@ ui_pick_backend
 chk "no backend clears UI_BIN"  "$UI_BIN" ""
 chk "no backend clears flag"    "${UI_SCROLL[*]}" ""
 
+# --- overflow hint -----------------------------------------------------------
+# newt draws no scrollbar even with --scrolltext, so a long review screen looks
+# truncated when it is only scrolled to the top. The title has to say so, and
+# only when there is actually more than the box shows.
+have() { [[ $1 == whiptail ]]; }
+UI_BIN=""; UI_SCROLL=(); ui_pick_backend
+
+seen=""; ui_msgbox "review" "$(printf 'line\n%.0s' $(seq 1 40))"
+chk "long text flags PgDn"  "$(has x "$seen" 'PgDn for more')" yes
+
+seen=""; ui_msgbox "review" "short body"
+chk "short text does not"   "$(has x "$seen" 'PgDn for more')" no
+
+# The boundary: 16 lines fit, 17 do not.
+fit=$(printf 'l\n%.0s' $(seq 1 15))l
+seen=""; ui_msgbox "review" "$fit"
+chk "16 lines fit"          "$(has x "$seen" 'PgDn for more')" no
+seen=""; ui_msgbox "review" "$fit\nl\nl"
+chk "18 lines do not"       "$(has x "$seen" 'PgDn for more')" yes
+
+# Wrapping counts, not just newlines: one long line can overflow on its own.
+seen=""; ui_msgbox "review" "$(head -c 2000 /dev/zero | tr '\0' 'x')"
+chk "wrapped long line counts" "$(has x "$seen" 'PgDn for more')" yes
+
+# The real title must survive the suffix.
+chk "title kept"            "$(has x "$seen" 'review')" yes
+
 exit $fail
