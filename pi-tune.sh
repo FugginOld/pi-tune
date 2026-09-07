@@ -100,6 +100,9 @@ applied_index() {
     [[ -d $BACKUP_ROOT ]] || return 0
     while IFS= read -r d; do
         [[ -n $d && -r "$d/applied.list" ]] || continue
+        # A whole-run revert of a pre-schema-2 point marks the run, not the
+        # module, because there is no module level in it to mark.
+        [[ -e "$d/reverted" ]] && continue
         while read -r id; do
             # A tune that was reverted is not applied any more. Phase 2 writes
             # this marker per module; until then nothing carries it and every
@@ -583,8 +586,12 @@ do_revert() {
     if grep -qs '^schema=2$' "$dir/manifest"; then
         _revert_v2 "$dir" ${want[@]+"${want[@]}"}
     else
-        [[ ${#want[@]} -eq 0 ]] ||             die "$(basename "$dir") predates per-module backups and can only be reverted whole"
+        [[ ${#want[@]} -eq 0 ]] || die "$(basename "$dir") predates per-module backups and can only be reverted whole"
         _revert_v1 "$dir"
+        # A v1 point has no per-module level to mark, so mark the run.
+        # Without this, applied_index goes on counting an undone tune as
+        # applied and the report can still call it DONE.
+        date +%Y%m%d-%H%M%S > "$dir/reverted"
     fi
 
     info "revert complete — reboot if the original run required one"

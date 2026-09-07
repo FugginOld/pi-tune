@@ -146,5 +146,20 @@ printf 'v1-modified\n' > "$tgt/a.conf"
 
 do_revert 20260101-000000 >/dev/null 2>&1
 chk "v1 restores whole run"   "$(cat "$tgt/a.conf")"                       original-a
+# Nothing in a v1 point can carry a per-module marker, so the run carries it.
+# Without this the index keeps counting an undone tune as applied.
+chk "v1 marks the run"        "$(exists "$old/reverted")"                  yes
+BACKUP_ROOT="$PI_TUNE_BACKUP_ROOT"; applied_index
+chk "v1 revert leaves index"  "${APPLIED[mod-a]:-none}"                    none
+
+# --- 7. --only is refused on a point that cannot honour it ------------------
+printf 'host=t
+model=t
+version=1.0.0
+' > "$old/manifest"
+rm -f "$old/reverted"
+out=$(do_revert 20260101-000000 mod-a 2>&1); rc=$?
+chk "v1 rejects --only"       "$rc"                                        1
+chk "and says why"            "$(has x "$out" 'reverted whole')"           yes
 
 exit $fail
