@@ -55,7 +55,7 @@ ui_checklist() {
         i=$((i+3))
     done
 
-    printf '\n%s\n\n' "$text" >&2
+    printf '\n%b\n\n' "$text" >&2
     for i in "${!tags[@]}"; do
         printf '  %2d) [%s] %s\n' "$((i+1))" \
             "$([[ ${defaults[$i]} == ON ]] && echo x || echo ' ')" "${descs[$i]}" >&2

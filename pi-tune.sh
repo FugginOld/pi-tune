@@ -172,10 +172,15 @@ do_apply() {
         done
         info "--yes: selecting ${#chosen[@]} low-risk change(s)"
     else
-        local out
-        if ! out=$(ui_checklist "pi-tune $PI_TUNE_VERSION" \
-            "Select the changes to apply on $(hostname). Low-risk items are pre-selected; medium and high are not." \
-            "${items[@]}"); then
+        # The TUI clears the screen, taking print_report's fingerprint with it.
+        # Repeat the identifying facts here, where they are on screen at the
+        # moment the boxes get ticked — being on the box you think you are on
+        # matters more than any single item in the list.
+        local out header
+        printf -v header 'Host:   %s — %s\nSystem: %s, %s MB RAM, %s cores\nRoot:   %s (%s)\nLow-risk items are pre-selected; medium and high are not.' \
+            "$(hostname)" "$PI_MODEL" "${DISTRO_PRETTY:-unknown}" "$RAM_MB" "$CPU_COUNT" \
+            "${ROOT_SRC:-?}" "${ROOT_FSTYPE:-?}"
+        if ! out=$(ui_checklist "pi-tune $PI_TUNE_VERSION" "$header" "${items[@]}"); then
             info "cancelled"
             return 0
         fi
