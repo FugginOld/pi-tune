@@ -1,7 +1,9 @@
 # Plan — menu-driven TUI, four states, per-tune revert
 
-Status: **phases 1-2 done and verified on pi3b-DNS1** (`aed6f0d`, `7b5643f`).
-Phase 3 next, and its --extra-button exit codes are still an assumption.
+Status: **phases 1-3 done** (`aed6f0d`, `7b5643f`, `4c5f53f`). 1-2 verified on
+pi3b-DNS1; phase 3 is a primitive with no screen calling it yet, so it is
+exercised by tests only until phase 4 wires it.
+Phase 4 next: wire the five screens.
 Written 2026-09-07
 against `201f09c`.
 
