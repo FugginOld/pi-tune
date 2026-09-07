@@ -42,6 +42,11 @@ ui_overflows() {
 ui_msgbox() {
     local title=$1 text=$2
     local -a scroll=()
+    # Colour is set once at load from [[ -t 1 ]], so anything captured from a
+    # helper still carries it - the dry-run diff arrived here full of ^[[32m,
+    # which whiptail draws literally. No dialog body ever wants an escape, so
+    # strip them here rather than at each call site.
+    text=$(printf '%s\n' "$text" | sed "s/$(printf '\033')\[[0-9;]*m//g")
     if ui_available; then
         # Measured on a Pi 3B+, three msgboxes in one terminal: short text with
         # the flag draws a scrollbar, long text with it draws none, and long

@@ -177,4 +177,18 @@ chk "EOF aborts, not go-back"  "$?"                                   255
 out=$(printf '1\n' | ui_menu "t" "one\ntwo" a "row a" 2>&1 >/dev/null)
 chk "fallback expands \n"     "$(has x "$out" 'one\ntwo')"           no
 
+# --- escapes never reach a dialog body --------------------------------------
+# The dry-run screen captures apply_ids, whose colour is decided once at load
+# from [[ -t 1 ]] - so a run started on a tty hands this text ^[[32m, which
+# whiptail draws literally. Stripping lives in ui_msgbox because no caller
+# wants an escape in a box.
+esc=$(printf '\033')
+out=$(ui_msgbox "t" "$(printf '\033[32m==>\033[0m applying x\033[2m ok\033[0m')" 2>&1)
+chk "escapes stripped"        "$(printf '%s\n' "$out" | grep -c "$esc")"  0
+chk "the words survive"       "$(has x "$out" '==> applying x ok')"       yes
+# Only the colour form goes. A backslash is content - a diff carries whatever
+# the file carries - and must come out the other side.
+out=$(ui_msgbox "t" 'C:\path and a lone \ backslash' 2>&1)
+chk "backslashes kept"        "$(has x "$out" 'a lone \ backslash')"      yes
+
 exit $fail
