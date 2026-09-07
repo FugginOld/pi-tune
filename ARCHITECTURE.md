@@ -296,6 +296,17 @@ Exercised end to end:
   carries the token. Not covered by that: the dry-run diff path, and the
   `modprobe` drop-in fallback for boards with no `cmdline.txt`.
 
+- **Per-module backups and per-tune revert (plan phase 2).** Run
+  `20260907-155827` applied `docker-log-caps` and `idle-services` together and
+  wrote `schema=2` with both under `modules/`, no run-level `files/` or
+  `created.list`. `idle-services.list` — a sidecar no code repoints — landed in
+  its own module directory purely by resolving through `BACKUP_DIR`, which is
+  the "no change to any helper" claim holding on real hardware; at the run root
+  it would have made that tune's revert silently find nothing. Reverting only
+  `docker-log-caps` removed `daemon.json` and left `ModemManager` `disabled` /
+  `inactive`, and afterwards the same run reads `docker-log-caps` as `TUNE` and
+  `idle-services` as `DONE`.
+
 Not verified, and not inferable from the above:
 
 - **Restoring a modified file from the `files/` mirror.** Both reverts here

@@ -1,6 +1,7 @@
 # Plan — menu-driven TUI, four states, per-tune revert
 
-Status: **phases 1-2 done** (`aed6f0d`, and phase 2 pending its box check).
+Status: **phases 1-2 done and verified on pi3b-DNS1** (`aed6f0d`, `7b5643f`).
+Phase 3 next, and its --extra-button exit codes are still an assumption.
 Written 2026-09-07
 against `201f09c`.
 
