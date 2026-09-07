@@ -83,11 +83,45 @@ index_of() {
     return 1
 }
 
+# APPLIED[id] = timestamp of the most recent run that applied that check and has
+# not been reverted. Read-only, and every failure path here degrades to "empty"
+# rather than guessing — report mode runs unprivileged and may not be able to
+# read BACKUP_ROOT at all.
+declare -A APPLIED=()
+
+# applied_index — which checks pi-tune itself applied, across every rollback
+# point. "Already satisfied" and "we did it" are different facts: root-noatime
+# reads satisfied on a stock box pi-tune never touched, while journald-cap reads
+# satisfied because we capped it. Only the second is revertable, so only the
+# second is DONE. Sorted ascending, so the newest run wins.
+applied_index() {
+    local d id
+    APPLIED=()
+    [[ -d $BACKUP_ROOT ]] || return 0
+    while IFS= read -r d; do
+        [[ -n $d && -r "$d/applied.list" ]] || continue
+        while read -r id; do
+            # A tune that was reverted is not applied any more. Phase 2 writes
+            # this marker per module; until then nothing carries it and every
+            # id in applied.list counts.
+            [[ -n $id && ! -e "$d/modules/$id/reverted" ]] && APPLIED[$id]=$(basename "$d")
+        done < "$d/applied.list"
+    done < <(find "$BACKUP_ROOT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort)
+    return 0
+}
+
+# state_label <rc> [id] — the rc is check_detect's three-state contract and does
+# not change. DONE is a presentation split of state 0 against APPLIED, not a
+# fourth return code: making it one would ripple into all twelve modules.
 state_label() {
     case "$1" in
-        0) printf '%sOK  %s' "$C_GRN" "$C_OFF" ;;
+        0) if [[ -n ${2:-} && -n ${APPLIED[${2}]:-} ]]; then
+               printf '%sDONE%s' "$C_GRN" "$C_OFF"
+           else
+               printf '%sOK  %s' "$C_GRN" "$C_OFF"
+           fi ;;
         1) printf '%sTUNE%s' "$C_YEL" "$C_OFF" ;;
-        2) printf '%sn/a %s' "$C_DIM" "$C_OFF" ;;
+        2) printf '%sN/A %s' "$C_DIM" "$C_OFF" ;;
         *) printf '????' ;;
     esac
 }
@@ -127,7 +161,7 @@ print_report() {
 
     for i in "${!C_ID[@]}"; do
         [[ ${C_STATE[$i]} -eq 2 && $VERBOSE -eq 0 ]] && continue
-        printf '  [%b] %-26s %s\n' "$(state_label "${C_STATE[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
+        printf '  [%b] %-26s %s\n' "$(state_label "${C_STATE[$i]}" "${C_ID[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
         if [[ ${C_STATE[$i]} -eq 1 ]]; then
             printf '%s' "$C_DIM"
             {
@@ -422,7 +456,7 @@ pi-tune $PI_TUNE_VERSION — Raspberry Pi optimization auditor
   --only ID[,ID...]   Restrict to specific check IDs
   --no-tui            Force plain-text output
   --fleet h1,h2       SSH to each host and print its report
-  -v, --verbose       Show n/a checks and debug output
+  -v, --verbose       Show N/A checks and debug output
   -h, --help          This
 
 Backups live in $BACKUP_ROOT.
@@ -465,6 +499,7 @@ main() {
         exit 0
     fi
 
+    applied_index
     scan_checks
 
     case "$MODE" in

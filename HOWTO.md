@@ -46,19 +46,27 @@ is flat and the files need moving into `lib/` and `checks/`.
 Reads only. You get the host fingerprint, then the findings:
 
 ```
-  [OK  ] journald-cap               Cap systemd journal size
+  [DONE] journald-cap               Cap systemd journal size
+  [OK  ] root-noatime               Mount root with noatime
   [TUNE] wifi-powersave             Disable WiFi power save
         WiFi power save is on for wlan0 — expect periodic latency spikes.
 ```
 
 | Marker | Meaning |
 |---|---|
-| `OK` | Already in the state pi-tune wants. Nothing to do. |
 | `TUNE` | Applies to this host and is not set. Offered on `--apply`. |
-| `n/a` | Does not apply here. Hidden unless you pass `-v`. |
+| `DONE` | pi-tune applied it. Revertable. |
+| `OK` | Already in the state pi-tune wants, but pi-tune did not put it there. |
+| `N/A` | Does not apply here. Hidden unless you pass `-v`. |
 
-Add `-v` to see the `n/a` rows and why each was skipped — that is the fastest
+Add `-v` to see the `N/A` rows and why each was skipped — that is the fastest
 way to confirm the probe read the host correctly.
+
+`DONE` and `OK` are the same `check_detect` result: the condition is satisfied.
+They differ in who satisfied it, which is read from the `applied.list` of every
+rollback point. It matters because only `DONE` can be reverted — `root-noatime`
+reads `OK` on a stock Raspberry Pi OS image that already mounts with `noatime`,
+and there is nothing there to undo.
 
 ## See the exact changes before making any
 
@@ -164,7 +172,7 @@ Two that deserve a second pass a day later rather than a minute later:
 **`check directory not found: .../checks`** — the tree is flat. Move
 `{util,probe,ui}.sh` into `lib/` and the numbered files into `checks/`.
 
-**Everything reports `n/a`** — run with `-v` and read the fingerprint header.
+**Everything reports `N/A`** — run with `-v` and read the fingerprint header.
 An `unknown` model with an empty root source means the probe could not read
 `/proc/device-tree/model` or `findmnt` is missing. pi-tune is behaving
 correctly: it will not act on a host it cannot identify.

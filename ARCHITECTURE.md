@@ -38,9 +38,16 @@ module can clobber a driver global. Module-private state is prefixed with `_`
 
 | rc | Meaning | Report | Offered in checklist |
 |----|---------|--------|----------------------|
-| 0 | Condition already satisfied | `OK` | no |
+| 0 | Condition already satisfied | `DONE` or `OK` | no |
 | 1 | Applies here and is not satisfied | `TUNE` | yes |
-| 2 | Does not apply to this host | `n/a` (hidden unless `-v`) | no |
+| 2 | Does not apply to this host | `N/A` (hidden unless `-v`) | no |
+
+The report shows four states against these three return codes. `DONE` and `OK`
+are both rc `0`, split on whether the id appears in the `applied.list` of a
+rollback point that has not been reverted — `applied_index` builds that map.
+The split is presentation only and deliberately **not** a fourth return code:
+making it one would push the question "did we do this?" into all twelve modules,
+which cannot answer it.
 
 The default installed by `load_check` is `2`. A module that cannot positively
 confirm the condition must return `2` rather than guess — the whole point of
@@ -246,8 +253,8 @@ Not verified, and not inferable from the above:
   removed a created file or reset unit state. Every check that edits a
   pre-existing file (`root-noatime` on `/etc/fstab`, `usb-autosuspend`,
   `docker-log-caps` merging into an existing `daemon.json`) reports `OK` or
-  `n/a` on this host, so the restore-original-bytes path has never run.
-- **Anything Pi 5.** `pcie-gen3` has never returned anything but `n/a`, and NVMe
+  `N/A` on this host, so the restore-original-bytes path has never run.
+- **Anything Pi 5.** `pcie-gen3` has never returned anything but `N/A`, and NVMe
   root is inferred from that check existing rather than observed.
 - `wifi-powersave` and `root-noatime` applies. The first reloads NetworkManager,
   which is in the guarded set; check which interface carries the session first.

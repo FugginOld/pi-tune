@@ -6,7 +6,7 @@ checklist of the ones that apply. Nothing changes unless you ask.
 
 Written for a mixed fleet: Armbian on a Pi 5, Debian 13 on Pi 3Bs. Every check
 detects its own applicability rather than assuming a distro layout, so a module
-that can't confirm what it's looking at reports `n/a` instead of guessing.
+that can't confirm what it's looking at reports `N/A` instead of guessing.
 
 ## Usage
 
