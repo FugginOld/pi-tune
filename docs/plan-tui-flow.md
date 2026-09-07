@@ -177,11 +177,23 @@ survives, then `--report` shows one `DONE` and one back to `TUNE`.
 - `ui_menu <title> <text> <tag> <label> ...` — whiptail `--menu`, dialog
   `--menu`; plain-text numbered fallback mirroring `ui_checklist`'s.
 - The confirm reuses `ui_menu` rather than a third button. `--extra-button` is
-  not available: whiptail refuses it. **`ui_menu`'s own exit codes and its
-  stdout/stderr split are the next assumption to verify** — the checklist uses
-  `3>&1 1>&2 2>&3` to get the selection off stderr, and `--menu` is expected to
-  behave the same, but that is exactly the kind of thing that has been wrong
-  twice today. Probe before wiring.
+  not available: whiptail refuses it.
+
+  `--menu` measured on pi3b-DNS1, 2026-09-07 — no longer assumptions:
+
+  | behaviour | result |
+  |---|---|
+  | selection channel | tag on **stderr**, same `3>&1 1>&2 2>&3` as `ui_checklist` |
+  | any row chosen | `rc=0`; the **tag** carries which one, not the exit code |
+  | Cancel | `rc=1` |
+  | Esc | `rc=255` |
+  | `
+` in body text | **expands**; blank lines and leading indent preserved |
+
+  So `ui_menu` returns the tag and reserves `rc` for abort, and the confirm can
+  carry the change list as body text above its three rows. Cancel means Back
+  (return to the checklist); Esc means leave without applying — a real
+  distinction on the one screen that authorises a mutating run.
 - Both go through `ui_overflows` for the scroll flag and title hint, same as
   `ui_msgbox` and `ui_yesno`. Do not pass the scroll flag unconditionally — see
   `1db8af0`: on this whiptail the bar renders only when content already fits.
