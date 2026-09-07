@@ -287,14 +287,17 @@ Exercised end to end:
 - The unprivileged degradation in `docker-log-caps`' `check_why` — with
   `/var/lib/docker/containers` unreadable at `0710`, the size parenthetical is
   dropped whole rather than printed empty. Previously only asserted in tests.
+- **`cmdline_add`, the one boot-critical write in the repo.** Rollback point
+  `20260906-233556` applied `usb-autosuspend`, and its backup holds
+  `/boot/firmware/cmdline.txt` *without* `usbcore.autosuspend=-1` while the live
+  file carries it, appended with a single space and otherwise byte-identical.
+  So the write ran on vfat, `install_file` snapshotted the original first, and
+  the box has rebooted since with the kernel parsing the result — `/proc/cmdline`
+  carries the token. Not covered by that: the dry-run diff path, and the
+  `modprobe` drop-in fallback for boards with no `cmdline.txt`.
 
 Not verified, and not inferable from the above:
 
-- **`cmdline_add`'s write path.** This box already carries the token, so
-  `usb-autosuspend` short-circuits before writing. It is the one boot-critical
-  write in the repo and is covered only by tests against a temp file. Close it
-  on a board that lacks the token, not by removing it from one that boots over
-  USB to manufacture the case.
 - **Restoring a modified file from the `files/` mirror.** Both reverts here
   removed a created file or reset unit state. Every check that edits a
   pre-existing file (`root-noatime` on `/etc/fstab`, `usb-autosuspend`,

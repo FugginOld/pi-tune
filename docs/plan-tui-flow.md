@@ -223,9 +223,10 @@ scrolled past unread until this session proved it reaches the operator.
 
 - **`--extra-button` exit codes are assumed, not verified.** Phase 3 verifies
   before building on them.
-- **`cmdline_add`'s write path is still unverified on hardware** and Phase 2
-  moves the backup directory under it. The move does not change `install_file`,
-  but this is the one boot-critical write in the repo and it now has a new
-  path underneath it. Verify on a board that lacks the token.
+- ~~`cmdline_add`'s write path is unverified~~ — settled 2026-09-07 from the
+  backup of rollback point `20260906-233556`, which holds the pre-token
+  `cmdline.txt`. It ran on vfat and the box rebooted on the result. Phase 2 moves
+  the backup directory underneath it without touching `install_file`, so the
+  next `usb-autosuspend` apply on a fresh board re-proves it under schema 2.
 - Schema-1 rollback points exist on a live box. Every `do_revert` change is
   tested against a schema-1 fixture before it ships.
