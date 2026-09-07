@@ -15,7 +15,7 @@ CHECK_DIR="${PI_TUNE_CHECK_DIR:-$SCRIPT_DIR/checks}"
 LIB_DIR="$SCRIPT_DIR/lib"
 BACKUP_ROOT="${PI_TUNE_BACKUP_ROOT:-/var/backups/pi-tune}"
 
-MODE="report"
+MODE="auto"
 DRY_RUN=0
 ASSUME_YES=0
 NO_TUI=0
@@ -116,17 +116,26 @@ applied_index() {
 # state_label <rc> [id] — the rc is check_detect's three-state contract and does
 # not change. DONE is a presentation split of state 0 against APPLIED, not a
 # fourth return code: making it one would ripple into all twelve modules.
-state_label() {
+# state_word <rc> [id] — the bare word, no colour. The TUI needs this: an
+# escape sequence inside a whiptail body renders as garbage, not as colour.
+state_word() {
     case "$1" in
-        0) if [[ -n ${2:-} && -n ${APPLIED[${2}]:-} ]]; then
-               printf '%sDONE%s' "$C_GRN" "$C_OFF"
-           else
-               printf '%sOK  %s' "$C_GRN" "$C_OFF"
-           fi ;;
-        1) printf '%sTUNE%s' "$C_YEL" "$C_OFF" ;;
-        2) printf '%sN/A %s' "$C_DIM" "$C_OFF" ;;
-        *) printf '????' ;;
+        0) if [[ -n ${2:-} && -n ${APPLIED[${2}]:-} ]]; then echo DONE; else echo OK; fi ;;
+        1) echo TUNE ;;
+        2) echo "N/A" ;;
+        *) echo "????" ;;
     esac
+}
+
+state_label() {
+    local w c
+    w=$(state_word "$1" "${2:-}")
+    case "$w" in
+        TUNE) c=$C_YEL ;;
+        "N/A") c=$C_DIM ;;
+        *)    c=$C_GRN ;;
+    esac
+    printf '%s%-4s%s' "$c" "$w" "$C_OFF"
 }
 
 # --- rationale rendering ----------------------------------------------------
@@ -287,6 +296,16 @@ do_apply() {
         done
     fi
 
+    apply_ids ${chosen[@]+"${chosen[@]}"}
+}
+
+# apply_ids <id>... — the mutating half of an apply: backup point, health
+# snapshot, run each module, health gate, then the manual and reboot notes.
+# Split out so --apply's flow and the interactive screens share exactly one path
+# that writes. Two write paths would be two places to get the backup wrong.
+apply_ids() {
+    local -a chosen=("$@")
+    [[ ${#chosen[@]} -gt 0 ]] || { info "nothing selected"; return 0; }
     new_backup_dir
     health_snapshot
 
@@ -342,6 +361,7 @@ do_apply() {
     fi
     return 0
 }
+
 
 # --- revert -----------------------------------------------------------------
 
@@ -621,6 +641,239 @@ list_rollbacks() {
     printf '\n'
 }
 
+# --- interactive screens ----------------------------------------------------
+#
+# Each screen sets NEXT_SCREEN and returns; run_screens loops on it. Back is a
+# return value rather than a recursive call, so a user who changes their mind
+# repeatedly does not grow a call stack, and every screen has one exit.
+#
+# These live here rather than in lib/ui.sh on purpose: ui.sh is a widget wrapper
+# that knows nothing about checks, and it stays that way.
+NEXT_SCREEN=""
+
+# revert_items — checklist triples for everything still undoable: one row per
+# applied tune on a schema-2 point, and one row per whole run on a schema-1 one,
+# which has no per-module record to undo a single tune from.
+revert_items() {
+    local d ts id rest
+    while IFS= read -r d; do
+        [[ -n $d && -r "$d/applied.list" ]] || continue
+        [[ -e "$d/reverted" ]] && continue
+        ts=$(basename "$d")
+        if grep -qs '^schema=2$' "$d/manifest"; then
+            while read -r id; do
+                [[ -n $id ]] || continue
+                [[ -e "$d/modules/$id/reverted" ]] && continue
+                printf '%s\n%s\n%s\n' "$ts:$id" "$id   ($ts)" OFF
+            done < "$d/applied.list"
+        else
+            rest=$(tr '\n' ' ' < "$d/applied.list")
+            printf '%s\n%s\n%s\n' "$ts:" "whole run: $rest($ts)" OFF
+        fi
+    done < <(find "$BACKUP_ROOT" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -r)
+}
+
+revert_count() { local n; n=$(revert_items | wc -l); echo $(( n / 3 )); }
+
+screen_host() {
+    local -a rows=(tune "Tune this host")
+    [[ $(revert_count) -gt 0 ]] && rows+=(revert "Undo a previous change")
+    rows+=(quit "Quit")
+
+    local sel
+    sel=$(ui_menu "pi-tune $PI_TUNE_VERSION" "$(probe_summary)" "${rows[@]}") || {
+        NEXT_SCREEN=""; return 0
+    }
+    case "$sel" in
+        tune)   NEXT_SCREEN=status ;;
+        revert) NEXT_SCREEN=revert ;;
+        *)      NEXT_SCREEN="" ;;
+    esac
+}
+
+# Every check and where this host stands, N/A included. The report hides those
+# behind -v; here there is room, and "pi-tune considered this and it does not
+# apply" is worth seeing before choosing anything.
+status_text() {
+    local i
+    printf 'Every tuning pi-tune knows, and where this host stands.\n\n'
+    for i in "${!C_ID[@]}"; do
+        printf '  [%-4s] %-22s %s\n' \
+            "$(state_word "${C_STATE[$i]}" "${C_ID[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
+    done
+    printf '\n  TUNE = can be applied     DONE = applied by pi-tune, undoable\n'
+    printf '  OK   = already that way   N/A  = does not apply to this host\n'
+}
+
+screen_status() {
+    local sel
+    sel=$(ui_menu "Status" "$(status_text)" \
+          choose "Choose what to apply" back "Back") || { NEXT_SCREEN=""; return 0; }
+    case "$sel" in
+        choose) NEXT_SCREEN=select ;;
+        *)      NEXT_SCREEN=host ;;
+    esac
+}
+
+# confirm_rows <euid> — the choices on the screen that authorises a mutating
+# run. Apply is offered to root only; everyone else gets a dry run and a way
+# back. Takes the id as an argument rather than reading EUID directly, because
+# EUID is readonly and a rule that cannot be exercised is not a rule.
+confirm_rows() {
+    local -a rows=()
+    [[ $1 -eq 0 ]] && rows+=(apply "Apply the changes")
+    rows+=(dry "Dry run - show the diffs, write nothing" back "Back to the selection")
+    printf '%s\n' "${rows[@]}"
+}
+
+screen_select() {
+    local -a pending=() items=()
+    local i risk default
+    for i in "${!C_ID[@]}"; do
+        [[ ${C_STATE[$i]} -eq 1 ]] || continue
+        pending+=("$i")
+        risk="${C_RISK[$i]}"
+        default=OFF
+        [[ $risk == low ]] && default=ON
+        items+=("${C_ID[$i]}" "[$risk] ${C_TITLE[$i]}" "$default")
+    done
+
+    if [[ ${#pending[@]} -eq 0 ]]; then
+        ui_msgbox "Nothing to tune" \
+            "Everything that applies to this host is already in the state pi-tune wants."
+        NEXT_SCREEN=host
+        return 0
+    fi
+
+    ui_msgbox "Review" "$(review_text "${pending[@]}")"
+
+    local out sel rc why body
+    local -a chosen=() rows=()
+    while :; do
+        out=$(ui_checklist "Select" \
+              "Low-risk items are pre-selected; medium and high are not." \
+              "${items[@]}") || { NEXT_SCREEN=host; return 0; }
+        chosen=()
+        [[ -n $out ]] && mapfile -t chosen <<< "$out"
+        [[ ${#chosen[@]} -eq 0 ]] && { info "nothing selected"; NEXT_SCREEN=host; return 0; }
+
+        # Browsing needs no root; applying does. Rather than demanding root at
+        # launch, the Apply row is simply absent and the body says why.
+        rows=()
+        mapfile -t rows < <(confirm_rows "$EUID")
+        why=""
+        [[ $EUID -eq 0 ]] || why="
+
+Not running as root, so only a dry run is available here."
+
+        body="About to apply ${#chosen[@]} change(s) on $(hostname):\n\n"
+        body+="$(printf '  - %s\n' "${chosen[@]}")"
+        body+="\nOriginals are backed up and can be undone.$why"
+
+        sel=$(ui_menu "Confirm" "$body" "${rows[@]}")
+        rc=$?
+        # Cancel is a second thought: back to the checklist with the ticks still
+        # set. Esc is leaving, and must not apply anything.
+        [[ $rc -eq 1 ]] && continue
+        [[ $rc -ne 0 ]] && { NEXT_SCREEN=""; return 0; }
+
+        case "$sel" in
+            apply) DRY_RUN=0; break ;;
+            dry)   DRY_RUN=1; break ;;
+            *)     continue ;;
+        esac
+    done
+
+    apply_ids "${chosen[@]}"
+    NEXT_SCREEN=finish
+}
+
+screen_revert() {
+    if [[ $EUID -ne 0 ]]; then
+        ui_msgbox "Undo needs root" \
+            "Undoing a change writes to the system, so it needs root. Re-run with sudo."
+        NEXT_SCREEN=host
+        return 0
+    fi
+
+    local -a rows=()
+    mapfile -t rows < <(revert_items)
+    if [[ ${#rows[@]} -eq 0 ]]; then
+        ui_msgbox "Nothing to undo" \
+            "pi-tune has not applied anything on this host that is still in force."
+        NEXT_SCREEN=host
+        return 0
+    fi
+
+    local out body sure rc
+    out=$(ui_checklist "Undo" \
+          "Tick what to undo. A whole-run entry predates per-tune backups and comes back as one piece." \
+          "${rows[@]}") || { NEXT_SCREEN=host; return 0; }
+    [[ -n $out ]] || { NEXT_SCREEN=host; return 0; }
+
+    local -a sel=()
+    mapfile -t sel <<< "$out"
+    body="About to undo ${#sel[@]} item(s):\n\n"
+    body+="$(printf '  - %s\n' "${sel[@]}")"
+    sure=$(ui_menu "Confirm undo" "$body" undo "Undo them" back "Back")
+    rc=$?
+    [[ $rc -eq 0 && $sure == undo ]] || { NEXT_SCREEN=host; return 0; }
+
+    local tag ts id
+    local -A byrun=()
+    for tag in "${sel[@]}"; do
+        ts=${tag%%:*}
+        id=${tag#*:}
+        byrun[$ts]+="$id "
+    done
+    for ts in "${!byrun[@]}"; do
+        # Unquoted on purpose: a whole-run row carries an empty id and has to
+        # expand to no arguments, which is what do_revert reads as "everything".
+        # shellcheck disable=SC2086
+        do_revert "$ts" ${byrun[$ts]}
+    done
+
+    # Both the registry and the applied index are stale now.
+    applied_index
+    NEXT_SCREEN=host
+}
+
+screen_finish() {
+    local body="Done."
+    if [[ ${#NEEDS_MANUAL[@]} -gt 0 ]]; then
+        body+="\n\nManual follow-up needed:\n"
+        body+="$(printf '  - %s\n' "${NEEDS_MANUAL[@]}")"
+    fi
+
+    local -a rows=()
+    if [[ $NEEDS_REBOOT -eq 1 ]]; then
+        body+="\n\nA reboot is required for some changes to take effect."
+        rows+=(reboot "Reboot now")
+    fi
+    rows+=(exit "Exit")
+
+    local sel
+    sel=$(ui_menu "Finished" "$body" "${rows[@]}") || { NEXT_SCREEN=""; return 0; }
+    [[ $sel == reboot ]] && { info "rebooting"; run systemctl reboot; }
+    NEXT_SCREEN=""
+}
+
+run_screens() {
+    local screen=host
+    while [[ -n $screen ]]; do
+        NEXT_SCREEN=""
+        case "$screen" in
+            host)   screen_host ;;
+            status) screen_status ;;
+            select) screen_select ;;
+            revert) screen_revert ;;
+            finish) screen_finish ;;
+            *)      NEXT_SCREEN="" ;;
+        esac
+        screen=$NEXT_SCREEN
+    done
+}
+
 # --- fleet ------------------------------------------------------------------
 
 do_fleet() {
@@ -642,7 +895,7 @@ usage() {
     cat <<EOF
 pi-tune $PI_TUNE_VERSION — Raspberry Pi optimization auditor
 
-  --report            Audit only, change nothing (default)
+  --report            Audit only, non-interactive (default without a TTY)
   --apply             Audit, then offer a checklist of changes
   --dry-run           With --apply: show diffs and commands, write nothing
   --yes               Non-interactive; apply all low-risk items
@@ -662,7 +915,7 @@ EOF
 main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --report)    MODE=report ;;
+            --report)    MODE=report ;;   # explicit: never interactive
             --apply)     MODE=apply ;;
             --list)      MODE=list ;;
             --rollbacks) MODE=rollbacks ;;
@@ -707,6 +960,18 @@ main() {
             ;;
         report)
             print_report
+            ;;
+        auto)
+            # The menu is the default only when there is a terminal and a
+            # backend, which is exactly ui_available. Everything else falls
+            # through to the report: CI runs --report --no-tui unprivileged and
+            # asserts it, and --fleet ships the tree over SSH and runs the same.
+            # Neither may ever meet a dialog.
+            if ui_available; then
+                run_screens
+            else
+                print_report
+            fi
             ;;
         revert)
             [[ $EUID -eq 0 ]] || die "revert needs root"

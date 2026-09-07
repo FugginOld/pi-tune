@@ -1,9 +1,11 @@
 # Plan — menu-driven TUI, four states, per-tune revert
 
-Status: **phases 1-3 done** (`aed6f0d`, `7b5643f`, `4c5f53f`). 1-2 verified on
-pi3b-DNS1, and phase 3 verified there too through a throwaway harness, since
-the primitive has no screen calling it until phase 4.
-Phase 4 next: wire the five screens.
+Status: **phases 1-4 done** (`aed6f0d`, `7b5643f`, `4c5f53f`, this commit).
+1-2 verified on pi3b-DNS1, and phase 3 verified there too through a throwaway
+harness, since the primitive had no screen calling it until phase 4. Phase 4
+awaits its box check: the five screens walked on a TTY, and the same walk as a
+non-root user to confirm Apply is withheld.
+Phase 5 (the finish screen's manual/reboot surfacing) folded into phase 4.
 Written 2026-09-07
 against `201f09c`.
 
