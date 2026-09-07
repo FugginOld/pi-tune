@@ -31,9 +31,16 @@ them:
   satisfied on pi3b-DNS1 and pi-tune never touched it — collapsing those two
   would have the tool claim credit for the distro's defaults and would leave the
   Revert page filtering the difference back out anyway.
-- **Dry run is a third button on the confirm**, via `--extra-button`, not a row
-  in the checklist. The checklist stays a list of tunes; the mode choice sits at
-  the moment of commitment.
+- **Dry run is a third choice on the confirm**, not a row in the checklist. The
+  checklist stays a list of tunes; the mode choice sits at the moment of
+  commitment. Originally specced as `--extra-button`; **whiptail rejects that
+  option outright** (`--extra-button: unknown option`, verified on pi3b-DNS1
+  2026-09-07) and whiptail is what Raspberry Pi OS ships. `dialog` does support
+  it, but a design that works on only the secondary backend is not a design. The
+  confirm is a three-item `--menu` instead — `Apply` / `Dry run` / `Back`, with
+  the change list as the body text above them. Both backends have `--menu`, and
+  phase 3 needed `ui_menu` for the host screen anyway, so this costs no new
+  primitive.
 
 ## Invariants that constrain this
 
@@ -169,11 +176,12 @@ survives, then `--report` shows one `DONE` and one back to `TUNE`.
 
 - `ui_menu <title> <text> <tag> <label> ...` — whiptail `--menu`, dialog
   `--menu`; plain-text numbered fallback mirroring `ui_checklist`'s.
-- `ui_confirm3 <title> <text> <yes> <extra> <no>` — `--extra-button`
-  `--extra-label`. **Verify the exit codes on the box before relying on them**:
-  whiptail is expected to give OK=0, Cancel=1, Extra=3, Esc=255, but that is
-  the same class of assumption as `--scrolltext` and it was wrong last time.
-  Plain-text fallback reads one of three letters.
+- The confirm reuses `ui_menu` rather than a third button. `--extra-button` is
+  not available: whiptail refuses it. **`ui_menu`'s own exit codes and its
+  stdout/stderr split are the next assumption to verify** — the checklist uses
+  `3>&1 1>&2 2>&3` to get the selection off stderr, and `--menu` is expected to
+  behave the same, but that is exactly the kind of thing that has been wrong
+  twice today. Probe before wiring.
 - Both go through `ui_overflows` for the scroll flag and title hint, same as
   `ui_msgbox` and `ui_yesno`. Do not pass the scroll flag unconditionally — see
   `1db8af0`: on this whiptail the bar renders only when content already fits.
