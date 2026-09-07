@@ -307,6 +307,14 @@ Exercised end to end:
   `inactive`, and afterwards the same run reads `docker-log-caps` as `TUNE` and
   `idle-services` as `DONE`.
 
+- **`ui_menu` (plan phase 3).** Against real whiptail: the tag survives the
+  `3>&1 1>&2 2>&3` capture while the dialog draws on the terminal, a middle row
+  returns its own tag rather than an off-by-one, Cancel gives `1` and Esc `255`
+  with no stale tag on either, and the overflow budget shrinking with list
+  height triggers the title hint at 30 lines against a 7-row menu. PgDn moves
+  the body of a menu — worth recording, because a menu's list is focusable and
+  `--msgbox`, where focus sits on the button, was the case measured earlier.
+
 Not verified, and not inferable from the above:
 
 - **Restoring a modified file from the `files/` mirror.** Both reverts here

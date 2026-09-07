@@ -1,8 +1,8 @@
 # Plan — menu-driven TUI, four states, per-tune revert
 
 Status: **phases 1-3 done** (`aed6f0d`, `7b5643f`, `4c5f53f`). 1-2 verified on
-pi3b-DNS1; phase 3 is a primitive with no screen calling it yet, so it is
-exercised by tests only until phase 4 wires it.
+pi3b-DNS1, and phase 3 verified there too through a throwaway harness, since
+the primitive has no screen calling it until phase 4.
 Phase 4 next: wire the five screens.
 Written 2026-09-07
 against `201f09c`.
