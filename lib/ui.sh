@@ -18,10 +18,17 @@ ui_available() { [[ -n $UI_BIN ]]; }
 
 # Callers write line breaks as the "\n" escape, which is what whiptail expects.
 # The fallback has to expand them itself, hence %b rather than %s.
+# ui_yesno <title> <text> [yes-label] [no-label]
+# Labels are whiptail-only; the plain-text fallback stays [y/N] because its
+# reply is matched on the first letter, and "Apply"/"Back" would both fail it.
+# Callers that relabel must therefore say in <text> what the no branch does.
 ui_yesno() {
-    local title=$1 text=$2 reply
+    local title=$1 text=$2 yes=${3:-} no=${4:-} reply
+    local -a btn=()
+    [[ -n $yes ]] && btn+=(--yes-button "$yes")
+    [[ -n $no  ]] && btn+=(--no-button  "$no")
     if ui_available; then
-        "$UI_BIN" --title "$title" --yesno "$text" 18 76
+        "$UI_BIN" --title "$title" "${btn[@]}" --yesno "$text" 18 76
         return $?
     fi
     printf '\n%b\n%s [y/N] ' "$text" "$title" >&2

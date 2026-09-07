@@ -171,6 +171,7 @@ do_apply() {
             [[ ${C_RISK[$i]} == low ]] && chosen+=("${C_ID[$i]}")
         done
         info "--yes: selecting ${#chosen[@]} low-risk change(s)"
+        [[ ${#chosen[@]} -eq 0 ]] && { info "nothing selected"; return 0; }
     else
         # The TUI clears the screen, taking print_report's fingerprint with it.
         # Repeat the identifying facts here, where they are on screen at the
@@ -180,18 +181,33 @@ do_apply() {
         printf -v header 'Host:   %s — %s\nSystem: %s, %s MB RAM, %s cores\nRoot:   %s (%s)\nLow-risk items are pre-selected; medium and high are not.' \
             "$(hostname)" "$PI_MODEL" "${DISTRO_PRETTY:-unknown}" "$RAM_MB" "$CPU_COUNT" \
             "${ROOT_SRC:-?}" "${ROOT_FSTYPE:-?}"
-        if ! out=$(ui_checklist "pi-tune $PI_TUNE_VERSION" "$header" "${items[@]}"); then
-            info "cancelled"
-            return 0
-        fi
-        [[ -n $out ]] && mapfile -t chosen <<< "$out"
-    fi
+        # Checklist and confirmation are one loop. Answering Back on the
+        # confirmation reopens the checklist with the ticks still set, so a
+        # second thought costs one keypress instead of the whole selection.
+        local j sel
+        while :; do
+            if ! out=$(ui_checklist "pi-tune $PI_TUNE_VERSION" "$header" "${items[@]}"); then
+                info "cancelled"
+                return 0
+            fi
+            chosen=()
+            [[ -n $out ]] && mapfile -t chosen <<< "$out"
+            [[ ${#chosen[@]} -eq 0 ]] && { info "nothing selected"; return 0; }
 
-    [[ ${#chosen[@]} -eq 0 ]] && { info "nothing selected"; return 0; }
+            [[ $DRY_RUN -eq 1 ]] && break
 
-    if [[ $DRY_RUN -eq 0 && $ASSUME_YES -eq 0 ]]; then
-        ui_yesno "Confirm" "About to apply ${#chosen[@]} change(s):\n\n$(printf '  - %s\n' "${chosen[@]}")\n\nOriginals are backed up and can be rolled back with --revert." \
-            || { info "cancelled"; return 0; }
+            ui_yesno "Confirm" \
+                "About to apply ${#chosen[@]} change(s) on $(hostname):\n\n$(printf '  - %s\n' "${chosen[@]}")\n\nOriginals are backed up and can be rolled back with --revert.\n\nChoose Back to return to the checklist." \
+                Apply Back && break
+
+            # Back: carry this selection into the next pass as the defaults.
+            for ((j = 0; j < ${#items[@]}; j += 3)); do
+                items[$((j + 2))]=OFF
+                for sel in "${chosen[@]}"; do
+                    [[ ${items[$j]} == "$sel" ]] && items[$((j + 2))]=ON
+                done
+            done
+        done
     fi
 
     new_backup_dir
