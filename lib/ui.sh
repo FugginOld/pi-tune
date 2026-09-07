@@ -29,22 +29,34 @@ ui_init() {
 
 ui_available() { [[ -n $UI_BIN ]]; }
 
+# ui_overflows <text> <lines> <cols> — is there more text than the box shows?
+# Measured on wrapped lines, not newlines: at these widths one Effect paragraph
+# wraps to four or five, so counting newlines calls an overflowing screen short.
+ui_overflows() {
+    [[ $(printf '%b\n' "$1" | fold -s -w "$3" | wc -l) -gt $2 ]]
+}
+
 # ui_msgbox <title> <text> — one screen of read-only text. The scroll flag lets
 # the backend page through content taller than the box, which the review screen
 # needs once more than a couple of checks are pending.
 ui_msgbox() {
     local title=$1 text=$2
+    local -a scroll=()
     if ui_available; then
-        # Verified on a Pi 3B+: the text scrolls, and neither --msgbox nor
-        # --textbox draws a bar to say so. So overflow is reachable but silent -
-        # the review screen read as truncated mid-sentence when it was only
-        # scrolled to the top. Say it in the title, which stays visible and,
-        # unlike a first line of body text, does not push the content down.
-        # 22 lines of box less title, borders and button leaves ~16 for text,
-        # wrapped to the 78-column box less its margins.
-        [[ $(printf '%b\n' "$text" | fold -s -w 74 | wc -l) -gt 16 ]] &&
+        # Measured on a Pi 3B+, three msgboxes in one terminal: short text with
+        # the flag draws a scrollbar, long text with it draws none, and long
+        # text without it draws none either. So the bar appears only when there
+        # is nothing to scroll to, which is worse than no bar - it implies more
+        # below on a screen that is already complete. Pass the flag only on
+        # overflow, and say so in the title, which stays visible and, unlike a
+        # leading line of body text, does not push the content down to make room
+        # for the notice about content being pushed down.
+        # 22 lines of box less title, borders and button leaves ~16 for text.
+        if ui_overflows "$text" 16 74; then
             title="$title — PgDn for more"
-        "$UI_BIN" --title "$title" "${UI_SCROLL[@]}" --msgbox "$text" 22 78
+            scroll=("${UI_SCROLL[@]}")
+        fi
+        "$UI_BIN" --title "$title" "${scroll[@]}" --msgbox "$text" 22 78
     else
         printf '\n%b\n\n' "$text"
     fi
@@ -62,11 +74,16 @@ ui_yesno() {
     [[ -n $yes ]] && btn+=(--yes-button "$yes")
     [[ -n $no  ]] && btn+=(--no-button  "$no")
     if ui_available; then
-        # The confirm dialog lists every pending change, so its text grows with
-        # the run while the box stays 18 lines. Without the scroll flag a long
-        # enough list loses its tail, and this is the screen the operator
-        # approves a mutating run from.
-        "$UI_BIN" --title "$title" "${btn[@]}" "${UI_SCROLL[@]}" --yesno "$text" 18 76
+        # Same rule as ui_msgbox, with this box's own dimensions: 18 lines less
+        # chrome leaves ~14. The confirm text lists every pending change, so it
+        # grows with the run, and this is the screen the operator approves a
+        # mutating run from - the worst one to leave a silent tail on.
+        local -a scroll=()
+        if ui_overflows "$text" 14 72; then
+            title="$title — PgDn for more"
+            scroll=("${UI_SCROLL[@]}")
+        fi
+        "$UI_BIN" --title "$title" "${btn[@]}" "${scroll[@]}" --yesno "$text" 18 76
         return $?
     fi
     printf '\n%b\n%s [y/N] ' "$text" "$title" >&2

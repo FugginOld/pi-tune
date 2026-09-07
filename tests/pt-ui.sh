@@ -47,10 +47,13 @@ for bin in whiptail dialog; do
     chk "$bin selected"        "$UI_BIN" "$bin"
     chk "$bin pairs $want"     "${UI_SCROLL[*]}" "$want"
 
-    seen=""; ui_msgbox "t" "body"
+    # Overflowing text, since the flag is only sent when there is something to
+    # scroll - the point here is that each backend gets its own spelling.
+    over=$(printf 'line\n%.0s' $(seq 1 40))
+    seen=""; ui_msgbox "t" "$over"
     chk "$bin msgbox sends it" "$(has x "$seen" "$want")" yes
 
-    seen=""; ui_yesno "t" "body" "Apply" "Back"
+    seen=""; ui_yesno "t" "$over" "Apply" "Back"
     chk "$bin yesno sends it"  "$(has x "$seen" "$want")" yes
     # The relabelled buttons must survive alongside the new flag.
     chk "$bin yesno keeps labels" "$(has x "$seen" '--yes-button Apply')" yes
@@ -70,11 +73,36 @@ chk "no backend clears flag"    "${UI_SCROLL[*]}" ""
 have() { [[ $1 == whiptail ]]; }
 UI_BIN=""; UI_SCROLL=(); ui_pick_backend
 
-seen=""; ui_msgbox "review" "$(printf 'line\n%.0s' $(seq 1 40))"
+long=$(printf 'line\n%.0s' $(seq 1 40))
+seen=""; ui_msgbox "review" "$long"
 chk "long text flags PgDn"  "$(has x "$seen" 'PgDn for more')" yes
 
 seen=""; ui_msgbox "review" "short body"
 chk "short text does not"   "$(has x "$seen" 'PgDn for more')" no
+
+# The bar appears only when content fits and is absent when it overflows, so on
+# a screen that fits the flag draws a bar promising more that is not there.
+seen=""; ui_msgbox "review" "short body"
+chk "fits: no scroll flag"  "$(has x "$seen" '--scrolltext')" no
+seen=""; ui_msgbox "review" "$long"
+chk "overflows: scroll flag" "$(has x "$seen" '--scrolltext')" yes
+
+# ui_yesno measures its own smaller box rather than borrowing msgbox's numbers.
+seen=""; ui_yesno "Confirm" "two\nlines" Apply Back
+chk "yesno fits: no flag"   "$(has x "$seen" '--scrolltext')" no
+chk "yesno fits: no hint"   "$(has x "$seen" 'PgDn for more')" no
+seen=""; ui_yesno "Confirm" "$long" Apply Back
+chk "yesno overflows: flag" "$(has x "$seen" '--scrolltext')" yes
+chk "yesno overflows: hint" "$(has x "$seen" 'PgDn for more')" yes
+chk "yesno keeps buttons"   "$(has x "$seen" '--yes-button Apply')" yes
+
+# 15 wrapped lines fit an 18-line yesno box but not... nothing: both boxes must
+# use their own threshold, so a text between the two sizes separates them.
+mid=$(printf 'l\n%.0s' $(seq 1 15))
+seen=""; ui_msgbox "review" "$mid"; m=$(has x "$seen" 'PgDn for more')
+seen=""; ui_yesno "Confirm" "$mid" A B; y=$(has x "$seen" 'PgDn for more')
+chk "15 lines: msgbox fits"  "$m" no
+chk "15 lines: yesno does not" "$y" yes
 
 # The boundary: 16 lines fit, 17 do not.
 fit=$(printf 'l\n%.0s' $(seq 1 15))l
