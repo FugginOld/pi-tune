@@ -228,3 +228,17 @@ it cannot drift from it.
   backup directories. Single-operator tool; not worth the flock.
 - **`--fleet` is report-only** by construction: it ships the tree over SSH and
   runs `--report --no-tui`. There is no remote apply.
+- **There is no UAS quirk check**, though `8a9744c` left a note planning one.
+  The observed evidence says not to build it yet. On pi3b-DNS1 the kernel
+  refuses UAS outright — `the driver for the USB controller does not support
+  scatter-gather which is required by the UAS driver` — and binds `usb-storage`
+  on every boot. That is the `dwc_otg` controller, so it holds for every
+  pre-Pi-4 board, and a `usb-storage.quirks=` token there would be a no-op
+  against a driver that was never going to load. The check would only mean
+  anything on a Pi 4/5, where `xhci` does support scatter-gather and `uas` binds
+  for real — and no Pi 4/5 here boots from USB, so there is nothing to observe
+  and nothing to verify a fix against. The one adapter with real data
+  (`7825:a2a4`, OWC PA023U3) is on the board that cannot use UAS at all, so it
+  is not evidence of a bad bridge; it is evidence of nothing. A known-bad quirk
+  list with no confirmed-bad entries matches nothing and only costs a boot arg.
+  Build it when a Pi 4/5 boots from USB here and `uas` actually misbehaves.

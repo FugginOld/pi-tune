@@ -149,7 +149,18 @@ sysctl_drop_in() {
 # cmdline_has <token>
 cmdline_has() {
     [[ -n ${CMDLINE_TXT:-} && -r ${CMDLINE_TXT:-} ]] || return 1
-    grep -qw -- "$1" "$CMDLINE_TXT"
+    # Compare tokens exactly rather than grepping for one. Neither grep route is
+    # safe here: without -F the dot in usbcore.autosuspend=-1 is a wildcard, and
+    # -w does not reliably supply the boundary (grep -wF matched that token
+    # inside xusbcore.autosuspend=-1). The kernel command line is whitespace-
+    # separated tokens, so split it and compare - no regex, no grep-build quirks.
+    local -a toks; local tok
+    while read -r -a toks; do
+        for tok in ${toks[@]+"${toks[@]}"}; do
+            [[ $tok == "$1" ]] && return 0
+        done
+    done < "$CMDLINE_TXT"
+    return 1
 }
 
 # cmdline_add <token> — append a token to the single-line firmware cmdline.
