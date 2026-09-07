@@ -3,26 +3,39 @@
 # plain text so the tool still works over a dumb pipe or in CI.
 
 UI_BIN=""
+# Both backends silently clip text taller than the box - no bar, no marker, no
+# error, the tail is just gone - and both need asking. They spell it
+# differently: --scrolltext is newt's, and passing it to dialog is an unknown
+# option rather than a no-op, so it cannot be hardcoded for both.
+UI_SCROLL=()
+# ui_pick_backend — pair the backend with its own spelling of the scroll flag.
+# Separate from ui_init only because ui_init's first act is a tty test that a
+# test harness cannot satisfy, and this pairing is the part worth pinning: the
+# wrong flag here is not a degraded box, it is an unknown option and no dialog.
+ui_pick_backend() {
+    if have whiptail; then UI_BIN=whiptail; UI_SCROLL=(--scrolltext)
+    elif have dialog;   then UI_BIN=dialog;  UI_SCROLL=(--scrollbar)
+    else UI_BIN=""; UI_SCROLL=()
+    fi
+}
+
 ui_init() {
     if [[ ${NO_TUI:-0} -eq 1 || ! -t 0 || ! -t 1 ]]; then
-        UI_BIN=""
+        UI_BIN=""; UI_SCROLL=()
         return 0
     fi
-    if have whiptail; then UI_BIN=whiptail
-    elif have dialog;   then UI_BIN=dialog
-    else UI_BIN=""
-    fi
+    ui_pick_backend
 }
 
 ui_available() { [[ -n $UI_BIN ]]; }
 
-# ui_msgbox <title> <text> — one screen of read-only text. --scrolltext lets
-# whiptail page through content taller than the box, which the review screen
+# ui_msgbox <title> <text> — one screen of read-only text. The scroll flag lets
+# the backend page through content taller than the box, which the review screen
 # needs once more than a couple of checks are pending.
 ui_msgbox() {
     local title=$1 text=$2
     if ui_available; then
-        "$UI_BIN" --title "$title" --scrolltext --msgbox "$text" 22 78
+        "$UI_BIN" --title "$title" "${UI_SCROLL[@]}" --msgbox "$text" 22 78
     else
         printf '\n%b\n\n' "$text"
     fi
@@ -40,7 +53,11 @@ ui_yesno() {
     [[ -n $yes ]] && btn+=(--yes-button "$yes")
     [[ -n $no  ]] && btn+=(--no-button  "$no")
     if ui_available; then
-        "$UI_BIN" --title "$title" "${btn[@]}" --yesno "$text" 18 76
+        # The confirm dialog lists every pending change, so its text grows with
+        # the run while the box stays 18 lines. Without the scroll flag a long
+        # enough list loses its tail, and this is the screen the operator
+        # approves a mutating run from.
+        "$UI_BIN" --title "$title" "${btn[@]}" "${UI_SCROLL[@]}" --yesno "$text" 18 76
         return $?
     fi
     printf '\n%b\n%s [y/N] ' "$text" "$title" >&2

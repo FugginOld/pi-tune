@@ -2,6 +2,9 @@ set -uo pipefail
 cd "$1" || exit 1
 . lib/util.sh; . lib/ui.sh
 NO_TUI=1; ui_init                      # force the plain-text fallback
+chk() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2' want '$3'"; fail=1; fi; }
+has() { case "$2" in *"$3"*) echo yes ;; *) echo no ;; esac; }
+fail=0
 
 txt="About to apply 2 change(s):\n\n  - zram-swap\n  - wifi-powersave\n\nOriginals are backed up."
 out=$(echo n | ui_yesno "Confirm" "$txt" 2>&1 || true)
@@ -22,5 +25,42 @@ old_yesno() { printf '\n%s\n%s [y/N] ' "$2" "$1" >&2; }
 old=$(old_yesno "Confirm" "$txt" 2>&1)
 if [[ $old == *'\n'* ]]; then echo "ok   old %s impl fails the check (test discriminates)"
 else echo "FAIL test does not discriminate — old impl passes too"; fail=1; fi
+
+# --- scroll flag per backend -------------------------------------------------
+# Both backends clip text taller than the box with no bar, no marker and no
+# error. They spell the flag differently, and --scrolltext is an unknown option
+# to dialog rather than a harmless no-op, so one spelling for both breaks the
+# other outright. Only whiptail ships on Raspberry Pi OS, so the dialog pairing
+# has no box here to catch it - this is the only thing that will.
+seen=""
+whiptail() { seen="$*"; return 0; }
+dialog()   { seen="$*"; return 0; }
+
+for bin in whiptail dialog; do
+    case $bin in whiptail) want=--scrolltext ;; *) want=--scrollbar ;; esac
+
+    # ui_pick_backend probes with have(); answer for this backend only, then let
+    # it choose - the pairing is what is under test, not a value set by hand.
+    eval "have() { [[ \$1 == $bin ]]; }"
+    UI_BIN=""; UI_SCROLL=()
+    ui_pick_backend
+    chk "$bin selected"        "$UI_BIN" "$bin"
+    chk "$bin pairs $want"     "${UI_SCROLL[*]}" "$want"
+
+    seen=""; ui_msgbox "t" "body"
+    chk "$bin msgbox sends it" "$(has x "$seen" "$want")" yes
+
+    seen=""; ui_yesno "t" "body" "Apply" "Back"
+    chk "$bin yesno sends it"  "$(has x "$seen" "$want")" yes
+    # The relabelled buttons must survive alongside the new flag.
+    chk "$bin yesno keeps labels" "$(has x "$seen" '--yes-button Apply')" yes
+done
+
+# Neither backend installed: no flag to pass, and no TUI to pass it to.
+have() { return 1; }
+UI_BIN=whiptail; UI_SCROLL=(--scrolltext)
+ui_pick_backend
+chk "no backend clears UI_BIN"  "$UI_BIN" ""
+chk "no backend clears flag"    "${UI_SCROLL[*]}" ""
 
 exit $fail
