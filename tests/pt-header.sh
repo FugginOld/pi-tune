@@ -40,4 +40,24 @@ chk "fits in 72 cols"     "$(awk '{ if (length($0) > 72) n++ } END { print n+0 }
 chk "default selection"   "$out" journald-cap
 
 rm -f /tmp/hdr.err
+# --- the host screen's summary ----------------------------------------------
+# pi3b-DNS1 guards four units, and the list ran past the menu body's width and
+# wrapped back to column 0, under the labels rather than under the list. The
+# report indents the whole block by two so it never showed there.
+. lib/probe.sh
+IS_ARMBIAN=0; ARCH=aarch64; PAGE_SIZE=4096; CONFIG_TXT=/boot/firmware/config.txt
+SDR_TYPE=""; DOES_MLAT=0; HAS_DOCKER=1
+CRITICAL_UNITS=(ssh.service sshd.service docker.service NetworkManager.service)
+sum=$(probe_summary)
+g=$(printf '%s
+' "$sum" | sed -n '/^Guarding/,$p')
+chk "guarding wraps"          "$(printf '%s
+' "$g" | wc -l)"                     2
+# 13 spaces puts the continuation under the first unit, not under the label.
+chk "continuation is indented" "$(printf '%s
+' "$g" | sed -n '2p' | grep -c '^             [a-zA-Z]')" 1
+# A short list must not gain a second line - the fix must not wrap what fits.
+CRITICAL_UNITS=(ssh.service)
+chk "short list stays one line" "$(probe_summary | sed -n '/^Guarding/,$p' | wc -l)" 1
+
 exit $fail

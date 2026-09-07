@@ -784,7 +784,23 @@ Not running as root, so only a dry run is available here."
         esac
     done
 
-    apply_ids "${chosen[@]}"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        # The diff is the whole product of a dry run, and screen_finish opens a
+        # dialog over the terminal a moment after it prints - on the box it was
+        # only readable afterwards, in scrollback. Capture it and hand it back
+        # in a box that pages. Backslashes are doubled because whiptail expands
+        # escapes in body text, and a diff carries whatever the file carries.
+        local out
+        out=$(apply_ids "${chosen[@]}" 2>&1)
+        # shellcheck disable=SC1003  # a backslash is the literal wanted here
+        local bs='\'               # a lone backslash, held in a variable so
+        out=${out//"$bs"/"$bs$bs"}   # neither quoting layer can eat it
+        ui_msgbox "Dry run - nothing was written" "$out"
+    else
+        # A real apply streams: it can prompt (the health gate) and it can take
+        # a while, so it keeps the terminal rather than going into a box.
+        apply_ids "${chosen[@]}"
+    fi
     NEXT_SCREEN=finish
 }
 

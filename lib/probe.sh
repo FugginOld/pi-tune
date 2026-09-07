@@ -144,5 +144,6 @@ probe_summary() {
         "Firmware   : ${CONFIG_TXT:-none found}" \
         "SDR        : ${SDR_TYPE:-none}$([[ $DOES_MLAT -eq 1 ]] && echo ' (MLAT workload detected)')" \
         "Docker     : $([[ $HAS_DOCKER -eq 1 ]] && echo yes || echo no)" \
-        "Guarding   : ${CRITICAL_UNITS[*]:-none}"
+        "Guarding   : $(printf '%s' "${CRITICAL_UNITS[*]:-none}" |
+            fold -s -w 55 | sed '2,$s/^/             /')"
 }
