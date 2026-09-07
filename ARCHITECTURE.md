@@ -130,9 +130,10 @@ empty as a reason to return `2`, never as a default.
 | `RAM_MB` | `zram-swap`, `headless-target` |
 | `ARCH`, `CPU_COUNT`, `PAGE_SIZE` | report header |
 | `CONFIG_TXT`, `CMDLINE_TXT` | `usb-autosuspend`, `pcie-gen3`, `cmdline_add`, `config_txt_set` |
-| `ROOT_SRC`, `ROOT_FSTYPE`, `ROOT_IS_SD`, `ROOT_IS_USB` | `root-noatime` |
+| `ROOT_SRC`, `ROOT_FSTYPE`, `ROOT_IS_SD`, `ROOT_IS_USB` | `root-noatime`, `usb-autosuspend` |
+| `ROOT_MEDIA` | `journald-cap`, `zram-swap`, report header |
 | `HAS_NVME` | `pcie-gen3` |
-| `SDR_TYPE`, `HAS_SDR` | `usb-autosuspend`, `cpu-governor`, `dvb-blacklist` |
+| `SDR_TYPE`, `HAS_SDR` | `cpu-governor`, `dvb-blacklist`, `usb-autosuspend` |
 | `HAS_DOCKER` | `docker-log-caps` |
 | `HAS_NM` | `wifi-powersave` |
 | `DOES_MLAT` | `cpu-governor`, `chrony-timesync` |

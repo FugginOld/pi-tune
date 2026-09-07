@@ -19,8 +19,8 @@ check_why() {
 }
 
 check_impact() {
-    cat <<'EOF'
-Adds compressed swap in RAM at half of physical memory and biases the kernel toward it. Costs a little CPU to compress and avoids SD writes entirely. On sub-2 GB boards this is usually the single largest stability gain. Installs zram-tools, which revert does not remove.
+    cat <<EOF
+Adds compressed swap in RAM at half of physical memory and biases the kernel toward it. Costs a little CPU to compress and avoids writes to the ${ROOT_MEDIA:-root device} entirely. On sub-2 GB boards this is usually the single largest stability gain. Installs zram-tools, which revert does not remove.
 EOF
 }
 

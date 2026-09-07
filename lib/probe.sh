@@ -66,11 +66,17 @@ probe_host() {
     # ROOT_DISK is the whole-disk node behind the root partition, for checks
     # that need to read /sys/block/<disk> — the partition suffix differs by
     # bus: mmcblk0p2 and nvme0n1p1 strip "p<N>", sda1 strips a bare "<N>".
-    ROOT_IS_SD=0; ROOT_IS_NVME=0; ROOT_IS_USB=0
+    # ROOT_MEDIA is the same fact in words, so the twelve modules can name the
+    # medium in their own text instead of each growing a branch. Empty means
+    # undetermined — modules stay generic rather than guessing a medium.
+    ROOT_IS_SD=0; ROOT_IS_NVME=0; ROOT_IS_USB=0; ROOT_MEDIA=""
     case "$ROOT_SRC" in
-        /dev/mmcblk*) ROOT_IS_SD=1;   ROOT_DISK=$(basename "${ROOT_SRC%p[0-9]*}") ;;
-        /dev/nvme*)   ROOT_IS_NVME=1; ROOT_DISK=$(basename "${ROOT_SRC%p[0-9]*}") ;;
-        /dev/sd*)     ROOT_IS_USB=1;  ROOT_DISK=$(basename "${ROOT_SRC}" | sed 's/[0-9]*$//') ;;
+        /dev/mmcblk*) ROOT_IS_SD=1;   ROOT_MEDIA="SD card"
+                      ROOT_DISK=$(basename "${ROOT_SRC%p[0-9]*}") ;;
+        /dev/nvme*)   ROOT_IS_NVME=1; ROOT_MEDIA="NVMe"
+                      ROOT_DISK=$(basename "${ROOT_SRC%p[0-9]*}") ;;
+        /dev/sd*)     ROOT_IS_USB=1;  ROOT_MEDIA="USB-attached disk"
+                      ROOT_DISK=$(basename "${ROOT_SRC}" | sed 's/[0-9]*$//') ;;
     esac
     HAS_NVME=0
     compgen -G "/dev/nvme[0-9]n[0-9]" >/dev/null 2>&1 && HAS_NVME=1
@@ -134,7 +140,7 @@ probe_summary() {
         "Model      : $PI_MODEL" \
         "Distro     : ${DISTRO_PRETTY:-unknown}$([[ $IS_ARMBIAN -eq 1 ]] && echo ' (Armbian)')" \
         "Arch/pages : $ARCH, ${PAGE_SIZE}B pages, ${CPU_COUNT} cores, ${RAM_MB} MB RAM" \
-        "Root       : ${ROOT_SRC:-?} (${ROOT_FSTYPE:-?})$([[ $ROOT_IS_SD -eq 1 ]] && echo ' [SD]')$([[ $ROOT_IS_NVME -eq 1 ]] && echo ' [NVMe]')" \
+        "Root       : ${ROOT_SRC:-?} (${ROOT_FSTYPE:-?})${ROOT_MEDIA:+ [$ROOT_MEDIA]}" \
         "Firmware   : ${CONFIG_TXT:-none found}" \
         "SDR        : ${SDR_TYPE:-none}$([[ $DOES_MLAT -eq 1 ]] && echo ' (MLAT workload detected)')" \
         "Docker     : $([[ $HAS_DOCKER -eq 1 ]] && echo yes || echo no)" \

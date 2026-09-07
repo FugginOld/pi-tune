@@ -20,7 +20,7 @@ check_detect() {
 check_why() {
     local sz=""
     have journalctl && sz=$(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | tail -n1)
-    echo "Journal is uncapped${sz:+ (currently ~$sz)}; a log storm can fill the card."
+    echo "Journal is uncapped${sz:+ (currently ~$sz)}; a log storm can fill the ${ROOT_MEDIA:-root filesystem}."
 }
 
 check_impact() {
