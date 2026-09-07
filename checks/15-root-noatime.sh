@@ -19,6 +19,12 @@ check_why() {
     echo "Root is on flash with atime updates enabled — every read writes metadata."
 }
 
+check_impact() {
+    cat <<'EOF'
+Removes a metadata write on every file read, which is the main avoidable source of flash wear. Remounts / live, no reboot. Access times stop being accurate, which a few tools rely on (mail spools, some backup and cache-eviction logic).
+EOF
+}
+
 check_apply() {
     local tmp; tmp=$(mktemp) || return 1
     awk 'BEGIN{OFS="\t"}

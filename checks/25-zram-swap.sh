@@ -18,6 +18,12 @@ check_why() {
     echo "${RAM_MB} MB RAM with no zram swap — memory pressure currently goes to disk or OOM."
 }
 
+check_impact() {
+    cat <<'EOF'
+Adds compressed swap in RAM at half of physical memory and biases the kernel toward it. Costs a little CPU to compress and avoids SD writes entirely. On sub-2 GB boards this is usually the single largest stability gain. Installs zram-tools, which revert does not remove.
+EOF
+}
+
 check_apply() {
     pkg_install zram-tools || return 1
 

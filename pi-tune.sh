@@ -33,16 +33,17 @@ FLEET=""
 
 # --- check registry ---------------------------------------------------------
 
-declare -a C_ID=() C_TITLE=() C_RISK=() C_FILE=() C_WHY=() C_STATE=()
+declare -a C_ID=() C_TITLE=() C_RISK=() C_FILE=() C_WHY=() C_IMPACT=() C_STATE=()
 
 # load_check <file> — source a module in isolation. Functions and metadata are
 # reset first so a module that omits one can't inherit the previous module's.
 load_check() {
     local f=$1
-    unset -f check_detect check_why check_apply check_revert check_revert_post
+    unset -f check_detect check_why check_impact check_apply check_revert check_revert_post
     CHECK_ID=""; CHECK_TITLE=""; CHECK_RISK="medium"
     check_detect() { return 2; }
     check_why()    { echo "(no rationale provided)"; }
+    check_impact() { :; }
     check_apply()  { return 1; }
     check_revert()      { return 0; }
     check_revert_post() { return 0; }
@@ -67,6 +68,7 @@ scan_checks() {
         C_RISK+=("$CHECK_RISK")
         C_FILE+=("$f")
         C_WHY+=("$(check_why 2>/dev/null)")
+        C_IMPACT+=("$(check_impact 2>/dev/null)")
         C_STATE+=("$rc")
         dbg "$CHECK_ID -> state $rc"
     done
@@ -90,6 +92,31 @@ state_label() {
     esac
 }
 
+# --- rationale rendering ----------------------------------------------------
+
+# _field <label> <text> — one labelled paragraph, wrapped with a hanging indent
+# so continuation lines line up under the first. 62 + 10 of indent stays inside
+# whiptail's 78-column box.
+_field() {
+    local label=$1
+    printf '%s\n' "$2" | fold -s -w 62 \
+        | sed -e "1s/^/  $label /" -e "2,\$s/^/          /"
+}
+
+# review_text <index>... — the pre-checklist briefing: for every pending change,
+# why this host was flagged and what applying it costs. Same content the report
+# prints, gathered into one screen because the TUI clears the report away.
+review_text() {
+    local i
+    printf '%d change(s) apply to %s.\nReview, then choose which to make.\n' \
+        "$#" "$(hostname)"
+    for i in "$@"; do
+        printf '\n%s  [%s]\n' "${C_ID[$i]}" "${C_RISK[$i]}"
+        _field 'Why:   ' "${C_WHY[$i]}"
+        [[ -n ${C_IMPACT[$i]} ]] && _field 'Effect:' "${C_IMPACT[$i]}"
+    done
+}
+
 # --- report -----------------------------------------------------------------
 
 print_report() {
@@ -102,7 +129,12 @@ print_report() {
         [[ ${C_STATE[$i]} -eq 2 && $VERBOSE -eq 0 ]] && continue
         printf '  [%b] %-26s %s\n' "$(state_label "${C_STATE[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
         if [[ ${C_STATE[$i]} -eq 1 ]]; then
-            printf '        %s%s%s\n' "$C_DIM" "${C_WHY[$i]}" "$C_OFF"
+            printf '%s' "$C_DIM"
+            {
+                _field 'Why:   ' "${C_WHY[$i]}"
+                [[ -n ${C_IMPACT[$i]} ]] && _field 'Effect:' "${C_IMPACT[$i]}"
+            } | sed 's/^/    /'
+            printf '%s' "$C_OFF"
             pending=$((pending+1))
         fi
     done
@@ -184,6 +216,11 @@ do_apply() {
         # Checklist and confirmation are one loop. Answering Back on the
         # confirmation reopens the checklist with the ticks still set, so a
         # second thought costs one keypress instead of the whole selection.
+        # Only in TUI mode: on the plain path print_report has already shown
+        # all of this and is still on screen, so a second copy is noise.
+        ui_available && ui_msgbox "pi-tune $PI_TUNE_VERSION — review" \
+            "$(review_text "${pending[@]}")"
+
         local j sel
         while :; do
             if ! out=$(ui_checklist "pi-tune $PI_TUNE_VERSION" "$header" "${items[@]}"); then

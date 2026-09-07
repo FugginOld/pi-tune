@@ -18,6 +18,12 @@ check_why() {
     echo "NVMe on a Pi 5 running the PCIe link at Gen 2 — Gen 3 is unofficial but usually roughly doubles throughput."
 }
 
+check_impact() {
+    cat <<'EOF'
+Raises the Pi 5 PCIe link from Gen 2 to Gen 3, roughly doubling NVMe throughput. This is outside Raspberry Pi's certified spec: a minority of drives negotiate the link and then fail under sustained I/O. Needs a reboot, and needs a real read/write load to trust - a spot check will not surface it.
+EOF
+}
+
 check_apply() {
     config_txt_set 'dtparam=pciex1_gen=3' || return 1
     require_manual "Unofficial speed. After reboot verify with \`dmesg | grep -i pcie\` and run a read/write test; if the drive drops out, revert this change."

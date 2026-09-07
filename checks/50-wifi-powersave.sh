@@ -20,6 +20,12 @@ check_why() {
     echo "WiFi power save is on for ${WIFI_IFACES[*]} — expect periodic latency spikes and dropped sessions."
 }
 
+check_impact() {
+    cat <<'EOF'
+Stops the radio sleeping between beacons, removing the multi-second stalls usually blamed on flaky WiFi. Small constant increase in idle power. Applied live and persisted, so it survives reconnects and reboots.
+EOF
+}
+
 check_apply() {
     if [[ $HAS_NM -eq 1 ]]; then
         write_drop_in /etc/NetworkManager/conf.d/99-pi-tune-powersave.conf <<'EOF'

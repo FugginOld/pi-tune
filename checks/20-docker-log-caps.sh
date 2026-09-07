@@ -39,6 +39,12 @@ check_why() {
     echo "Container logs are unbounded${biggest:+ (largest today: $biggest)}."
 }
 
+check_impact() {
+    cat <<'EOF'
+Caps container logs at 10 MB x 3 files. Takes effect only after systemctl restart docker, which bounces every container unless live-restore is on. Existing containers keep their current settings until recreated, so this protects new ones rather than fixing logs already on disk.
+EOF
+}
+
 check_apply() {
     local tmp; tmp=$(mktemp) || return 1
 

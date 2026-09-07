@@ -16,6 +16,18 @@ ui_init() {
 
 ui_available() { [[ -n $UI_BIN ]]; }
 
+# ui_msgbox <title> <text> — one screen of read-only text. --scrolltext lets
+# whiptail page through content taller than the box, which the review screen
+# needs once more than a couple of checks are pending.
+ui_msgbox() {
+    local title=$1 text=$2
+    if ui_available; then
+        "$UI_BIN" --title "$title" --scrolltext --msgbox "$text" 22 78
+    else
+        printf '\n%b\n\n' "$text"
+    fi
+}
+
 # Callers write line breaks as the "\n" escape, which is what whiptail expects.
 # The fallback has to expand them itself, hence %b rather than %s.
 # ui_yesno <title> <text> [yes-label] [no-label]

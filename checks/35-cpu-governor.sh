@@ -22,6 +22,12 @@ check_why() {
     echo "Governor is '$(cat "$_gov" 2>/dev/null)' on a capture host — clock ramping adds sample jitter."
 }
 
+check_impact() {
+    cat <<'EOF'
+Pins every core to its maximum clock. Removes frequency-ramp jitter from timing-sensitive capture at the cost of several degrees C and a few extra watts, continuously. A Pi 5 without active cooling may throttle - watch temperatures for a day before trusting it.
+EOF
+}
+
 check_apply() {
     grep -qw performance /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null \
         || { err "performance governor not available on this kernel"; return 1; }

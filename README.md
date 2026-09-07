@@ -79,6 +79,13 @@ check_detect() {          # 0 = already good, 1 = needs work, 2 = doesn't apply
 }
 
 check_why()    { echo "Why this matters, with live values where possible."; }
+
+check_impact() { cat <<'EOF'
+What applying it changes, what it costs, and what to watch afterwards.
+Static prose — no live values. Shown before the boxes are ticked.
+EOF
+}
+
 check_apply()  { write_drop_in /etc/foo.conf <<'EOF'
 setting=value
 EOF
@@ -90,6 +97,14 @@ check_revert_post() { return 0; }   # after files are restored: reload things
 
 Return `2` liberally. A check that can't positively confirm the condition should
 declare itself inapplicable rather than act on an assumption.
+
+`check_why` and `check_impact` answer different questions and both are shown
+before anything is applied — in the report, and on the review screen the TUI
+puts ahead of the checklist. `check_why` is evidence that *this* host needs the
+change, so it reads live values. `check_impact` is what applying it costs, so
+it's static prose: the follow-up work it creates, what gets slower, hotter or
+less accurate, and what to watch afterwards. Write the cost honestly — the
+review screen is the last point at which someone can decline.
 
 File restores are automatic, so the revert hooks only handle things that aren't
 files — a service you enabled, a package you installed. Which of the two you

@@ -15,6 +15,12 @@ check_why() {
     echo "RTL dongle present and dvb_usb_rtl28xxu is not blacklisted — it will claim the device on boot."
 }
 
+check_impact() {
+    cat <<'EOF'
+Stops the kernel DVB-T driver claiming the RTL dongle before userspace can, and unloads it live where possible. If you ever want to use that dongle as an actual DVB-T receiver, this is the change to revert.
+EOF
+}
+
 check_apply() {
     write_drop_in /etc/modprobe.d/pi-tune-rtlsdr-blacklist.conf <<'EOF'
 # pi-tune: keep the DVB-T stack away from the SDR dongle.

@@ -29,6 +29,12 @@ check_why() {
 # A candidate can be enabled-but-stopped, or running-but-not-enabled (started
 # by hand). Record both bits so revert restores that exact state instead of
 # flattening everything to "enabled and running".
+check_impact() {
+    cat <<'EOF'
+Disables stock daemons with nothing to do on this host, freeing a little RAM and some boot dependencies. Each unit is restored to exactly the state it was in on revert. Only matters if you actually use a cellular modem, physical-button events, or printing.
+EOF
+}
+
 check_apply() {
     local u any=0
     while read -r u; do

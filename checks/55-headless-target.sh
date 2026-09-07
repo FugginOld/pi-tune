@@ -18,6 +18,12 @@ check_why() {
     echo "No local session in use but the default target is graphical.target (${RAM_MB} MB RAM total)."
 }
 
+check_impact() {
+    cat <<'EOF'
+Boots to multi-user instead of graphical, freeing the display stack's memory and a chunk of boot time - material on a 1 GB board. Attach a monitor later and you get a console, not a desktop, until you set the target back.
+EOF
+}
+
 check_apply() {
     run systemctl set-default multi-user.target || return 1
     require_reboot

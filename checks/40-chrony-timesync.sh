@@ -28,6 +28,12 @@ check_why() {
     echo "MLAT workload detected but time is kept by $(unit_active systemd-timesyncd.service && echo systemd-timesyncd || echo 'no disciplined NTP client')."
 }
 
+check_impact() {
+    cat <<'EOF'
+Replaces systemd-timesyncd (SNTP, drifts between polls) with chrony, which disciplines the clock continuously. MLAT needs sub-millisecond stability that timesyncd does not provide. Installs chrony and disables timesyncd; the clock may step once on first sync.
+EOF
+}
+
 check_apply() {
     pkg_install chrony || return 1
     if unit_exists systemd-timesyncd.service; then

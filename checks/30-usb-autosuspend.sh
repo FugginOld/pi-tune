@@ -20,6 +20,12 @@ check_why() {
     echo "${SDR_TYPE:-SDR} attached and USB autosuspend is active — the hub can idle the port mid-capture."
 }
 
+check_impact() {
+    cat <<'EOF'
+Stops the kernel idling USB ports mid-capture, a common cause of SDR dropouts. Raises idle power slightly for every USB device, not just the SDR. Applied via the kernel command line, so it needs a reboot to take effect.
+EOF
+}
+
 check_apply() {
     if [[ -n ${CMDLINE_TXT:-} ]]; then
         cmdline_add "usbcore.autosuspend=-1" || return 1

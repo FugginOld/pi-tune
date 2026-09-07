@@ -19,13 +19,13 @@ misplaced lib fails with a bare bash message rather than a diagnostic.
 ## Why a registry of sourced modules
 
 The driver knows nothing about any specific tuning. A check file declares three
-variables and up to four functions; the driver sources it into its own shell.
+variables and up to six functions; the driver sources it into its own shell.
 No subprocess, so a module gets the probe globals and the backup plumbing for
 free and can leave state behind (`require_reboot`, `require_manual`) that the
 driver reads afterward.
 
-Isolation is by reset, not by subshell. `load_check()` unsets the four hook
-functions, reinstalls safe defaults, clears `CHECK_ID`/`CHECK_TITLE` and sets
+Isolation is by reset, not by subshell. `load_check()` unsets every hook
+function, reinstalls safe defaults, clears `CHECK_ID`/`CHECK_TITLE` and sets
 `CHECK_RISK=medium`, then sources. A module that omits `check_revert` gets the
 no-op — never the previous module's. The price of sharing one shell is that a
 module can clobber a driver global. Module-private state is prefixed with `_`
@@ -52,22 +52,29 @@ and only one of them is safe to act on. `root-noatime` returning `2` when
 
 **Report** (`--report`, default, no root):
 `ui_init` -> `probe_host` -> `scan_checks` (source each module, run
-`check_detect` and `check_why`, record state) -> `print_report`.
+`check_detect`, `check_why` and `check_impact`, record state) -> `print_report`.
 
 **Apply** (`--apply`, root, or `--dry-run` without):
 report, then `do_apply`:
 
 1. Collect state-1 checks; `low` risk pre-ticked, `medium`/`high` unticked.
-2. `ui_checklist` -> selection, then a second `ui_yesno` confirmation.
-3. `new_backup_dir` — `/var/backups/pi-tune/<YYYYmmdd-HHMMSS>/` plus `manifest`.
-4. `health_snapshot` — copies `CRITICAL_UNITS` (units already active at probe
+2. In TUI mode only, a review screen: every pending change with its
+   `check_why` and `check_impact`. The TUI clears the screen, so the report is
+   gone by the time the checklist opens; on the plain path the report is still
+   visible and the screen is skipped as duplication.
+3. `ui_checklist` -> selection, then a `ui_yesno` confirmation offering
+   Apply/Back. Back reopens the checklist with the selection carried in as the
+   new defaults, so a second thought costs one keypress rather than the whole
+   selection. Cancel on the checklist, or selecting nothing, exits.
+4. `new_backup_dir` — `/var/backups/pi-tune/<YYYYmmdd-HHMMSS>/` plus `manifest`.
+5. `health_snapshot` — copies `CRITICAL_UNITS` (units already active at probe
    time) into `ACTIVE_BEFORE`.
-5. Per selected id: append to `applied.list` **before** calling `check_apply`,
+6. Per selected id: append to `applied.list` **before** calling `check_apply`,
    re-source the module, run it. A module that dies mid-write is already
    recorded and stays reachable by `--revert`.
-6. `health_verify` — any unit in `ACTIVE_BEFORE` no longer active triggers an
+7. `health_verify` — any unit in `ACTIVE_BEFORE` no longer active triggers an
    offer to roll the whole run back.
-7. Print `NEEDS_MANUAL` items and the reboot flag.
+8. Print `NEEDS_MANUAL` items and the reboot flag.
 
 **Revert** (`--revert TS|last`, root):
 `scan_checks` runs first — revert needs the registry to map an id back to a

@@ -23,6 +23,12 @@ check_why() {
     echo "Journal is uncapped${sz:+ (currently ~$sz)}; a log storm can fill the card."
 }
 
+check_impact() {
+    cat <<'EOF'
+Caps the journal at 200 MB with a 500 MB free-space floor. Journald restarts, so a running journalctl -f drops. Nothing is deleted immediately; entries past the cap go at the next rotation.
+EOF
+}
+
 check_apply() {
     write_drop_in "$_jconf" <<'EOF'
 # pi-tune: bound journal growth so a chatty service can't fill the disk.
