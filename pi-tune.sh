@@ -239,9 +239,9 @@ do_apply() {
 
             # Back: carry this selection into the next pass as the defaults.
             for ((j = 0; j < ${#items[@]}; j += 3)); do
-                items[$((j + 2))]=OFF
+                items[j + 2]=OFF
                 for sel in "${chosen[@]}"; do
-                    [[ ${items[$j]} == "$sel" ]] && items[$((j + 2))]=ON
+                    [[ ${items[$j]} == "$sel" ]] && items[j + 2]=ON
                 done
             done
         done
