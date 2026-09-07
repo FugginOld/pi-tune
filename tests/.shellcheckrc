@@ -14,8 +14,14 @@ disable=SC2034
 # The file under test is chosen at runtime: `. "$drv"`, `. "./$drv"`.
 disable=SC1090
 
-# Stub overrides (unit_active, got) are called by the sourced code, not directly.
-disable=SC2329
+# Stub overrides (unit_active, got, whiptail) are called by the sourced code or
+# by name through "$UI_BIN", not directly. Both codes are the same finding in
+# different shellcheck versions: 0.11.0 locally reports SC2329, whatever
+# ubuntu-latest installs reports SC2317. Disabling only one passes on the
+# machine you tested and fails on the other, which is how three green local runs
+# became three red CI runs. The Lint step now prints its version so the next
+# divergence names itself instead of having to be inferred from a code.
+disable=SC2329,SC2317
 
 # check_detect/check_why/check_impact arrive by sourcing a file under checks/ at
 # runtime, so shellcheck reports them as used before their definition even when
