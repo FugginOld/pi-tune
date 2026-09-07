@@ -118,4 +118,63 @@ chk "wrapped long line counts" "$(has x "$seen" 'PgDn for more')" yes
 # The real title must survive the suffix.
 chk "title kept"            "$(has x "$seen" 'review')" yes
 
+# --- ui_menu -----------------------------------------------------------------
+# Probed on whiptail before this was written: tag on stderr, rc 0 for any
+# selection, 1 for Cancel, 255 for Esc. The stub writes to stderr because that
+# is where the real thing puts it, and ui_menu's 3>&1 1>&2 2>&3 is what turns
+# that into stdout for the caller.
+have() { [[ $1 == whiptail ]]; }
+UI_BIN=""; UI_SCROLL=(); ui_pick_backend
+argf=$(mktemp); trap 'rm -f "$argf"' EXIT
+# ui_menu runs its backend inside $( ), so a stub assigning to a variable would
+# be writing in a subshell and the assertion would read an empty string and
+# agree with anything. Record the arguments to a file instead.
+args() { cat "$argf"; }
+whiptail() { printf '%s
+' "$*" > "$argf"; echo "chosen" >&2; return 0; }
+
+: > "$argf"; got=$(ui_menu "Confirm" "body" a "row a" b "row b"); rc=$?
+chk "menu returns the tag"    "$got"                                  chosen
+chk "menu rc 0 on a choice"   "$rc"                                   0
+chk "menu passes --menu"      "$(has x "$(args)" '--menu')"          yes
+chk "list height = item count" "$(has x "$(args)" 'body 22 78 2')"    yes
+
+# rc has to survive: Cancel means go back, Esc means abort, and the confirm
+# screen is the one place that distinction authorises a mutating run.
+whiptail() { return 1; }
+ui_menu "Confirm" "body" a "row a" >/dev/null; chk "Cancel gives 1"   "$?" 1
+whiptail() { return 255; }
+ui_menu "Confirm" "body" a "row a" >/dev/null; chk "Esc gives 255"    "$?" 255
+# Nothing may reach stdout when the user did not choose - a caller reading the
+# tag must get an empty string, not a stale one.
+whiptail() { printf '%s
+' "$*" > "$argf"; echo "chosen" >&2; return 1; }
+got=$(ui_menu "Confirm" "body" a "row a"); chk "no tag on Cancel"     "$got" ""
+
+# The list shrinks the body's room, so the overflow budget moves with it.
+whiptail() { printf '%s
+' "$*" > "$argf"; echo "chosen" >&2; return 0; }
+short=$(printf 'l
+%.0s' $(seq 1 12))
+: > "$argf"; ui_menu "m" "$short" a "1" b "2" >/dev/null
+chk "12 lines fit a 2-row menu"  "$(has x "$(args)" 'PgDn for more')" no
+: > "$argf"; ui_menu "m" "$short" a "1" b "2" c "3" d "4" e "5" f "6" g "7" >/dev/null
+chk "same text overflows a 7-row menu" "$(has x "$(args)" 'PgDn for more')" yes
+
+# --- ui_menu plain-text fallback --------------------------------------------
+UI_BIN=""; UI_SCROLL=()
+got=$(printf '2\n' | ui_menu "t" "pick" a "row a" b "row b" 2>/dev/null); rc=$?
+chk "fallback returns the tag" "$got"                                 b
+chk "fallback rc 0"            "$rc"                                  0
+got=$(printf '\n' | ui_menu "t" "pick" a "row a" 2>/dev/null); rc=$?
+chk "Enter means go back"      "$rc"                                  1
+chk "and prints no tag"        "$got"                                 ""
+printf '9\n' | ui_menu "t" "pick" a "row a" >/dev/null 2>&1
+chk "out of range is a no"     "$?"                                   1
+ui_menu "t" "pick" a "row a" >/dev/null 2>&1 < /dev/null
+chk "EOF aborts, not go-back"  "$?"                                   255
+# The escape must expand here too, or the fallback shows a literal backslash-n.
+out=$(printf '1\n' | ui_menu "t" "one\ntwo" a "row a" 2>&1 >/dev/null)
+chk "fallback expands \n"     "$(has x "$out" 'one\ntwo')"           no
+
 exit $fail

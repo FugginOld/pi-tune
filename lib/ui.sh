@@ -91,6 +91,69 @@ ui_yesno() {
     [[ $reply =~ ^[Yy] ]]
 }
 
+# ui_menu <title> <text> <tag> <label> ... — one choice from a list. Prints the
+# chosen tag on stdout. rc 1 is Cancel and rc 255 is Esc, and callers must tell
+# those apart on any screen that authorises a change: Cancel means go back,
+# Esc means leave without doing it.
+#
+# Measured on whiptail 2026-09-07 rather than assumed, after --extra-button
+# turned out not to exist at all: the tag arrives on stderr through the same
+# 3>&1 1>&2 2>&3 the checklist uses, every selection returns 0 with the tag
+# carrying the choice, and \n in the body expands with indent preserved - which
+# is what lets a caller put a list of changes above the rows.
+ui_menu() {
+    local title=$1 text=$2; shift 2
+    local -a items=("$@")
+    local count=$(( ${#items[@]} / 2 ))
+
+    if ui_available; then
+        # The list eats rows the body would otherwise get, so the overflow
+        # budget shrinks as the menu grows rather than being a fixed number.
+        local lh=$count
+        [[ $lh -gt 10 ]] && lh=10
+        local budget=$(( 22 - lh - 6 ))
+        [[ $budget -lt 3 ]] && budget=3
+
+        local -a scroll=()
+        if ui_overflows "$text" "$budget" 74; then
+            title="$title — PgDn for more"
+            scroll=("${UI_SCROLL[@]}")
+        fi
+
+        local out rc
+        out=$("$UI_BIN" --title "$title" "${scroll[@]}" \
+              --menu "$text" 22 78 "$lh" "${items[@]}" 3>&1 1>&2 2>&3)
+        rc=$?
+        [[ $rc -eq 0 ]] && printf '%s\n' "$out"
+        return $rc
+    fi
+
+    # Plain-text fallback, mirroring ui_checklist's numbered form. %b, because
+    # callers write line breaks as the "\n" escape whiptail expects.
+    local -a tags=() labels=()
+    local i=0
+    while [[ $i -lt ${#items[@]} ]]; do
+        tags+=("${items[$i]}")
+        labels+=("${items[$((i+1))]}")
+        i=$((i+2))
+    done
+
+    printf '\n%b\n\n' "$text" >&2
+    for i in "${!tags[@]}"; do
+        printf '  %2d) %s\n' "$((i+1))" "${labels[$i]}" >&2
+    done
+    printf '\nSelect a number, or Enter to go back: ' >&2
+
+    local reply
+    # EOF is not a choice to go back - it is no terminal at all, which on a
+    # screen that authorises a change has to mean abort, the same as Esc.
+    read -r reply || return 255
+    [[ -n $reply && $reply =~ ^[0-9]+$ ]] || return 1
+    [[ $reply -ge 1 && $reply -le ${#tags[@]} ]] || return 1
+    printf '%s\n' "${tags[$((reply-1))]}"
+    return 0
+}
+
 # ui_checklist <title> <text> <tag> <desc> <on|off> ...
 # Prints selected tags, one per line, on stdout.
 ui_checklist() {
