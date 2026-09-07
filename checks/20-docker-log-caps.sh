@@ -7,6 +7,7 @@ CHECK_TITLE="Cap Docker container log size"
 CHECK_RISK="medium"
 
 _dconf="/etc/docker/daemon.json"
+_cdir="/var/lib/docker/containers"
 
 check_detect() {
     [[ $HAS_DOCKER -eq 1 ]] || return 2
@@ -33,10 +34,16 @@ PY
 }
 
 check_why() {
+    # numfmt --to=iec, matching journald-cap's "~17M". The old divisor printed
+    # "%.0f MB", so every log under half a megabyte rendered as "largest today:
+    # 0 MB" - a medium-risk change citing a measurement that argues against it.
+    # "today" was wrong too: nothing here is scoped to a day. This is the
+    # largest json.log currently on disk, which grows from container start or
+    # the last rotation.
     local biggest=""
-    biggest=$(find /var/lib/docker/containers -name '*-json.log' -printf '%s\n' 2>/dev/null \
-              | sort -n | tail -n1 | awk '{printf "%.0f MB", $1/1048576}')
-    echo "Container logs are unbounded${biggest:+ (largest today: $biggest)}."
+    biggest=$(find "$_cdir" -name '*-json.log' -printf '%s\n' 2>/dev/null \
+              | sort -n | tail -n1 | numfmt --to=iec 2>/dev/null)
+    echo "Container logs are unbounded${biggest:+ (largest on disk: $biggest)}."
 }
 
 check_impact() {
