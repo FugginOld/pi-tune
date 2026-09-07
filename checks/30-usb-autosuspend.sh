@@ -29,10 +29,12 @@ check_why() {
 }
 
 check_impact() {
+    # Says what applying it costs. The reason it is worth doing is check_why's
+    # job, and the two sit next to each other on the review screen.
     cat <<EOF
-Stops the kernel idling USB ports. Raises idle power slightly for every USB device on the board, not just the one that needs it. Applied via the kernel command line, so it needs a reboot to take effect.$(
+Stops the kernel idling USB ports. Raises idle power slightly for every USB device on the board, not just the one that needs it. Edits the kernel command line where the board has one, otherwise adds a modprobe option; either way it takes a reboot. The original file is backed up and revert restores it.$(
     [[ $ROOT_IS_USB -eq 1 ]] && printf ' %s' \
-        "With root on USB this protects the boot device: a port that idles under the root filesystem stalls I/O and can drop the disk off the bus entirely."
+        "Until that reboot the boot device is still exposed."
 )
 EOF
 }
