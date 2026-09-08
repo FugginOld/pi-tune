@@ -456,20 +456,6 @@ _drifted() {
     [[ $now != "$want" ]]
 }
 
-# revert_hooks <dir> <hook> — run one revert hook for every id in applied.list,
-# re-sourcing its module first so the hook comes from the right file.
-revert_hooks() {
-    local dir=$1 hook=$2 id
-    [[ -f "$dir/applied.list" ]] || return 0
-    while read -r id; do
-        [[ -n $id ]] || continue
-        registry_has "$id" || continue
-        load_check "$(registry_get "$id" file)" || continue
-        dbg "$hook: $id"
-        "$hook" || warn "$id $hook failed"
-    done < "$dir/applied.list"
-}
-
 # _revert_hook <id> <hook> — one revert hook, from the right module file.
 _revert_hook() {
     registry_has "$1" || return 0
@@ -478,81 +464,28 @@ _revert_hook() {
     "$2" || warn "$1 $2 failed"
 }
 
-# _revert_v1 <dir> — pre-schema-2 layout: one files/ tree at the run root and no
-# record of which module wrote what, so it can only be undone whole. Three of
-# these exist on pi3b-DNS1 and one is live; this path stays for them.
-_revert_v1() {
-    local dir=$1
-    # Modules that stashed a sidecar during apply (idle-services writes the
-    # unit list it disabled) read it back through BACKUP_DIR. Without this the
-    # path resolves to /<name> and the hook silently finds nothing.
-    BACKUP_DIR="$dir"
+# A rollback point is undone as a list of backup subtrees. Schema 2 has one per
+# applied module; schema 1 has no per-module level at all, so its single subtree
+# is the run directory itself. That is the only difference between them, and it
+# is expressed here rather than by keeping two copies of the walk - the two used
+# to run the same five phases with the restore, delete and rmdir loops written
+# out near-verbatim in both.
+declare -a REVERT_SUBS=()
 
-
-    # Modules that stashed a sidecar during apply (idle-services writes the
-    # unit list it disabled) read it back through BACKUP_DIR. Without this the
-    # path resolves to /<name> and the hook silently finds nothing.
-    BACKUP_DIR="$dir"
-
-    # 1. module-level undo that needs the applied config still on disk —
-    #    disabling a unit whose unit file we are about to delete, for one.
-    revert_hooks "$dir" check_revert
-
-    # 2. restore every snapshotted file to its original path.
-    if [[ -d "$dir/files" ]]; then
-        local src dest
-        while IFS= read -r -d '' src; do
-            dest="${src#"$dir/files"}"
-            info "restoring $dest"
-            mkdir -p "$(dirname "$dest")"
-            cp -a "$src" "$dest" || warn "could not restore $dest"
-        done < <(find "$dir/files" -type f -print0)
-    fi
-
-    # 3. delete files we created that did not exist before.
-    if [[ -f "$dir/created.list" ]]; then
-        local p
-        while read -r p; do
-            [[ -n $p && -e $p ]] || continue
-            info "removing $p"
-            rm -f "$p"
-        done < "$dir/created.list"
-    fi
-
-    # 4. remove directories we created, deepest first. rmdir refuses to touch
-    #    a directory anything else has since put a file in, which is the
-    #    behaviour we want — never rm -rf a path we only partly own.
-    if [[ -f "$dir/created.dirs" ]]; then
-        local d
-        while read -r d; do
-            [[ -n $d && -d $d ]] || continue
-            rmdir "$d" 2>/dev/null && info "removing empty $d"
-        done < "$dir/created.dirs"
-    fi
-
-    # 5. the on-disk state is now the original, so re-read it before the hooks
-    #    that exist to make a running service notice.
-    run systemctl daemon-reload
-    if compgen -G "$dir/files/etc/sysctl.d/*" >/dev/null 2>&1; then
-        run sysctl --quiet --system
-    fi
-
-    # 6. module-level undo that needs the ORIGINAL config back on disk —
-    #    restarting journald, remounting / from the restored fstab, reloading
-    #    NetworkManager. Running these in step 1 would have them pick up the
-    #    very config we are removing.
-    revert_hooks "$dir" check_revert_post
-}
-
-# _revert_v2 <dir> [id...] — per-module layout. With no ids, undoes the whole
-# run; with ids, only those tunes. Either way the phase order from v1 is kept:
-# every pre hook, then every restore, then the reload, then every post hook.
-# Doing one module end to end instead would run its post hook - a reload - over
-# another module's not-yet-restored config.
-_revert_v2() {
+# _revert_plan <dir> [id...] — fill REVERT_SUBS with what to undo, in undo
+# order. Fills an array rather than printing, because info and warn go to the
+# same stdout a printed list would use.
+_revert_plan() {
     local dir=$1; shift
-    local -a want=("$@") ids=() sel=()
-    local id m w hit
+    local -a want=("$@") ids=()
+    local id w hit m
+    REVERT_SUBS=()
+
+    if ! grep -qs '^schema=2$' "$dir/manifest"; then
+        [[ -e "$dir/reverted" ]] && { info "already reverted"; return 0; }
+        REVERT_SUBS=("$dir")
+        return 0
+    fi
 
     # applied.list is apply order; undo in reverse.
     while read -r id; do
@@ -568,55 +501,83 @@ _revert_v2() {
             for w in "${want[@]}"; do [[ $w == "$id" ]] && hit=1; done
             [[ $hit -eq 1 ]] || continue
         fi
-        sel+=("$id")
+        REVERT_SUBS+=("$m")
     done
-    [[ ${#sel[@]} -gt 0 ]] || { warn "nothing to revert"; return 0; }
+}
 
-    # 1. undo that needs the applied config still on disk.
-    for id in "${sel[@]}"; do
-        BACKUP_DIR="$dir/modules/$id"
-        _revert_hook "$id" check_revert
+# _subtree_ids <dir> <subtree> — the module ids whose hooks belong to this
+# subtree. Under schema 2 a subtree is one module and its name says which; under
+# schema 1 the one subtree owns the whole run, so applied.list says.
+_subtree_ids() {
+    if [[ $2 == "$1" ]]; then
+        [[ -f "$1/applied.list" ]] && cat "$1/applied.list"
+        return 0
+    fi
+    basename "$2"
+}
+
+# _revert_walk <dir> — the five phases, over REVERT_SUBS. Phases run across all
+# subtrees before the next begins: doing one subtree end to end would run its
+# post hook - a reload - over another's not-yet-restored config.
+_revert_walk() {
+    local dir=$1
+    local sub id src dest pth d kv
+    [[ ${#REVERT_SUBS[@]} -gt 0 ]] || { warn "nothing to revert"; return 0; }
+
+    # 1. undo that needs the applied config still on disk — disabling a unit
+    #    whose unit file we are about to delete, for one. BACKUP_DIR is pointed
+    #    at the subtree so a module reads back the sidecar it wrote during
+    #    apply; without it the path resolves to /<name> and the hook silently
+    #    finds nothing.
+    for sub in "${REVERT_SUBS[@]}"; do
+        BACKUP_DIR="$sub"
+        while read -r id; do
+            [[ -n $id ]] && _revert_hook "$id" check_revert
+        done < <(_subtree_ids "$dir" "$sub")
     done
 
-    # 2. restore, delete, rmdir — each module out of its own subtree.
-    local src dest pth d
-    for id in "${sel[@]}"; do
-        m="$dir/modules/$id"
-        if [[ -d "$m/files" ]]; then
+    # 2. restore, delete, rmdir — each subtree out of its own tree. A file that
+    #    changed since we applied it is left alone: restoring blind would undo
+    #    an edit pi-tune did not make. A subtree that recorded no hashes cannot
+    #    be judged, and there the old restore-anyway behaviour stands.
+    for sub in "${REVERT_SUBS[@]}"; do
+        if [[ -d "$sub/files" ]]; then
             while IFS= read -r -d '' src; do
-                dest="${src#"$m/files"}"
-                if _drifted "$m" "$dest"; then
-                    warn "$dest changed since $id was applied — left as it is"
+                dest="${src#"$sub/files"}"
+                if _drifted "$sub" "$dest"; then
+                    warn "$dest changed since it was applied — left as it is"
                     continue
                 fi
                 info "restoring $dest"
                 mkdir -p "$(dirname "$dest")"
                 cp -a "$src" "$dest" || warn "could not restore $dest"
-            done < <(find "$m/files" -type f -print0)
+            done < <(find "$sub/files" -type f -print0)
         fi
-        if [[ -f "$m/created.list" ]]; then
+        if [[ -f "$sub/created.list" ]]; then
             while read -r pth; do
                 [[ -n $pth && -e $pth ]] || continue
-                if _drifted "$m" "$pth"; then
-                    warn "$pth changed since $id was applied — left as it is"
+                if _drifted "$sub" "$pth"; then
+                    warn "$pth changed since it was applied — left as it is"
                     continue
                 fi
                 info "removing $pth"
                 rm -f "$pth"
-            done < "$m/created.list"
+            done < "$sub/created.list"
         fi
-        if [[ -f "$m/created.dirs" ]]; then
+        # rmdir refuses a directory anything else has since put a file in,
+        # which is what we want — never rm -rf a path we only partly own.
+        if [[ -f "$sub/created.dirs" ]]; then
             while read -r d; do
                 [[ -n $d && -d $d ]] || continue
                 rmdir "$d" 2>/dev/null && info "removing empty $d"
-            done < "$m/created.dirs"
+            done < "$sub/created.dirs"
         fi
     done
 
     # 3. the on-disk state is the original again; re-read it once for the batch.
     run systemctl daemon-reload
-    for id in "${sel[@]}"; do
-        if compgen -G "$dir/modules/$id/files/etc/sysctl.d/*" >/dev/null 2>&1; then
+    for sub in "${REVERT_SUBS[@]}"; do
+        if compgen -G "$sub/files/etc/sysctl.d/*" >/dev/null 2>&1; then
             run sysctl --quiet --system
             break
         fi
@@ -625,25 +586,31 @@ _revert_v2() {
     # A drop-in this run created is simply gone now, and --system re-reads only
     # what files still mention. The values recorded before the write are the
     # only route back to what the kernel had.
-    local kv
-    for id in "${sel[@]}"; do
-        [[ -f "$dir/modules/$id/sysctl.pre" ]] || continue
+    for sub in "${REVERT_SUBS[@]}"; do
+        [[ -f "$sub/sysctl.pre" ]] || continue
         while IFS= read -r kv; do
             [[ -n $kv ]] || continue
             info "restoring ${kv%%=*}"
             run sysctl --quiet -w "$kv"
-        done < "$dir/modules/$id/sysctl.pre"
+        done < "$sub/sysctl.pre"
     done
 
-    # 4. undo that needs the ORIGINAL config back on disk.
-    for id in "${sel[@]}"; do
-        BACKUP_DIR="$dir/modules/$id"
-        _revert_hook "$id" check_revert_post
+    # 4. undo that needs the ORIGINAL config back on disk — restarting journald,
+    #    remounting / from the restored fstab, reloading NetworkManager. In
+    #    phase 1 these would pick up the very config being removed.
+    for sub in "${REVERT_SUBS[@]}"; do
+        BACKUP_DIR="$sub"
+        while read -r id; do
+            [[ -n $id ]] && _revert_hook "$id" check_revert_post
+        done < <(_subtree_ids "$dir" "$sub")
     done
 
-    # 5. mark, so DONE stops claiming them and they are not offered again.
-    for id in "${sel[@]}"; do
-        date +%Y%m%d-%H%M%S > "$dir/modules/$id/reverted"
+    # 5. mark, so DONE stops claiming them and they are not offered again. One
+    #    rule for both schemas: the marker goes in the subtree, and under schema
+    #    1 the subtree is the run. do_revert used to write the schema-1 marker
+    #    itself while the schema-2 walk wrote its own.
+    for sub in "${REVERT_SUBS[@]}"; do
+        date +%Y%m%d-%H%M%S > "$sub/reverted"
     done
 }
 
@@ -661,16 +628,13 @@ do_revert() {
 
     info "reverting from $dir"
 
-    if grep -qs '^schema=2$' "$dir/manifest"; then
-        _revert_v2 "$dir" ${want[@]+"${want[@]}"}
-    else
-        [[ ${#want[@]} -eq 0 ]] || die "$(basename "$dir") predates per-module backups and can only be reverted whole"
-        _revert_v1 "$dir"
-        # A v1 point has no per-module level to mark, so mark the run.
-        # Without this, applied_index goes on counting an undone tune as
-        # applied and the report can still call it DONE.
-        date +%Y%m%d-%H%M%S > "$dir/reverted"
-    fi
+    # --only needs a per-module level to narrow to. A schema-1 point has none,
+    # so it is refused rather than quietly undoing the whole run.
+    grep -qs '^schema=2$' "$dir/manifest" || [[ ${#want[@]} -eq 0 ]] || \
+        die "$(basename "$dir") predates per-module backups and can only be reverted whole"
+
+    _revert_plan "$dir" ${want[@]+"${want[@]}"}
+    _revert_walk "$dir"
 
     info "revert complete — reboot if the original run required one"
 }

@@ -19,8 +19,8 @@ check_revert()      { echo "revert:\$([[ -f \$_f ]] && echo present || echo gone
 check_revert_post() { echo "post:\$([[ -f \$_f ]] && echo present || echo gone)" >> "$trace"; }
 FAKE
 
-# Source the driver with its self-invocation stripped, so do_revert is the real
-# function under test rather than a copy of it.
+# The driver guards its entry point, so sourcing it defines do_revert and runs
+# nothing - the function under test is the real one, not a copy.
 BACKUP_ROOT="$root/backups"; DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""
 . ./pi-tune.sh
 BACKUP_ROOT="$root/backups"          # driver re-defaults it on source

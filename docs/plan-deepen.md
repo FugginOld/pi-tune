@@ -87,13 +87,14 @@ The restore/delete/rmdir loops are near-verbatim; v1 also carries a literal
 copy-paste artefact, the same comment and `BACKUP_DIR="$dir"` assignment twice,
 four lines apart.
 
-v1 is missing two things v2 has, and this is the reason to do the work:
+v1 is missing two things v2 has: the drift guard and the `sysctl.pre` replay.
 
-- **the drift guard** - v1 restores blind, so a file edited since the apply is
-  clobbered rather than skipped
-- **the `sysctl.pre` replay** - v1 leaves changed sysctls running
-
-pi3b-DNS1 holds live schema-1 rollback points, so both gaps are reachable today.
+**Corrected while implementing.** Those gaps are not reachable on real schema-1
+points, and the review said otherwise. `_drifted` returns "not drifted" when no
+hash was recorded, and schema-1 backups predate `post.sha256` and `sysctl.pre`
+entirely - they carry neither, so both guards degrade to no-ops there whichever
+walk runs. The case for this step is the duplication and one marker rule, not a
+live correctness fix.
 
 Shape: one `revert_subtree <moddir> <id>` walk, and a schema adapter that says
 which subtrees to walk in what order.

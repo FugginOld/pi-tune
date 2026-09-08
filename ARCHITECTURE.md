@@ -242,12 +242,34 @@ work rather than ours. A partial revert the operator is told about beats a
 silent wrong one.
 
 **Schema 1 rollback points still exist and still revert.** A manifest with no
-`schema=2` line means the pre-2 layout — one `files/` tree at the run root, no
-record of which module wrote what — and takes the old whole-run walk.
-`--only` is refused there rather than silently reverting everything. Such a
-revert writes `<TS>/reverted` at the run level, since there is no module level
-in it to mark; `applied_index` skips the whole run when it sees that. Without
-it an undone tune keeps counting as applied and can still be reported `DONE`.
+`schema=2` line means the pre-2 layout — one `files/` tree at the run root and
+no record of which module wrote what. `--only` is refused there rather than
+silently reverting everything.
+
+Both schemas go through **one walk**. A rollback point is undone as a list of
+backup subtrees: `_revert_plan` produces one subtree per applied module under
+schema 2, newest-applied first, or the run directory itself as a single subtree
+under schema 1. `_revert_walk` then runs the five phases over that list, and
+`_subtree_ids` says whose hooks belong to each subtree — the directory name
+under schema 2, `applied.list` under schema 1.
+
+This was two functions running the same five phases, with the restore, delete
+and rmdir loops written out near-verbatim in each. The schema-1 copy had neither
+the drift guard nor the `sysctl.pre` replay.
+
+**That is not a fix to old backups.** Schema-1 points were written before
+`post.sha256` and `sysctl.pre` existed, so they carry neither, and both guards
+degrade to no-ops there by design — `_drifted` reports "not drifted" when no
+hash was recorded, because where we cannot tell, the restore-anyway behaviour
+stands. What unifying bought is one implementation to be right in, not a guard
+retrofitted onto data that was never captured.
+
+The marker rule is one rule: the walk writes `reverted` into the subtree, and
+under schema 1 the subtree is the run, so `<TS>/reverted` still appears at the
+run level. `applied_index` skips the whole run when it sees that — without it an
+undone tune keeps counting as applied and can still be reported `DONE`.
+`do_revert` used to write that marker itself while the schema-2 walk wrote its
+own.
 
 Every write funnels through `install_file()`, which does the same three things
 in the same order every time: `record_absent` (so a new file can be deleted on

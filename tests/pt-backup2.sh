@@ -209,4 +209,73 @@ chk "revert restores the value" "$(has x "$(cat "$root/sysctl.log" 2>/dev/null)"
 chk "restores by writing it"    "$(has x "$(cat "$root/sysctl.log" 2>/dev/null)" '-w vm.swappiness=60')" yes
 unset -f sysctl
 
+# --- 9. schema 1 goes through the same walk ---------------------------------
+# The two walks were separate copies of five phases; the schema-1 copy had
+# neither the drift guard nor the sysctl replay. They are one walk now, so a
+# schema-1 subtree carrying that data gets both.
+#
+# Note what this does NOT claim: the schema-1 rollback points that exist on real
+# hardware were written before post.sha256 and sysctl.pre existed, so they carry
+# neither and the guards stay no-ops there. _drifted returns "not drifted" when
+# no hash was recorded, deliberately - the old restore-anyway behaviour stands
+# where we cannot tell. What is asserted here is that the schema-1 path reaches
+# the same code, not that old backups gained a guard.
+v1="$PI_TUNE_BACKUP_ROOT/20260404-000000"
+mkdir -p "$v1/files$tgt"
+printf 'host=t\nmodel=t\nversion=1.0.0\n' > "$v1/manifest"      # no schema= line
+printf 'mod-a\n' > "$v1/applied.list"
+printf 'original-e\n' > "$v1/files$tgt/e.conf"
+printf 'tuned-e\n'    > "$tgt/e.conf"
+( cd / && sha256sum "$tgt/e.conf" ) > "$v1/post.sha256"
+printf 'someone-else\n' > "$tgt/e.conf"                          # drifted since
+printf 'vm.swappiness=60\n' > "$v1/sysctl.pre"
+
+sysctl() { [[ $1 == -n ]] && { echo 99; return 0; }; printf '%s\n' "$*" >> "$root/sysctl.log"; return 0; }
+: > "$root/sysctl.log"
+out=$(do_revert 20260404-000000 2>&1)
+
+chk "v1 honours the drift guard" "$(cat "$tgt/e.conf")"                      someone-else
+chk "v1 says why it skipped"     "$(has x "$out" 'changed since')"           yes
+chk "v1 replays sysctl.pre"      "$(has x "$(cat "$root/sysctl.log")" '-w vm.swappiness=60')" yes
+# The marker rule is one rule now: the walk writes it into the subtree, and
+# under schema 1 the subtree is the run. do_revert used to write this itself.
+chk "v1 marker still written"    "$(exists "$v1/reverted")"                   yes
+# And a second revert of the same point finds nothing left to do rather than
+# restoring over it again - schema 2 already behaved this way.
+out=$(do_revert 20260404-000000 2>&1)
+chk "v1 revert is idempotent"    "$(has x "$out" 'already reverted')"         yes
+unset -f sysctl
+
+# --- 10. a revert hook reads back the sidecar it wrote ----------------------
+# idle-services writes the unit list it disabled into BACKUP_DIR during apply
+# and reads it back in check_revert. That only works because the walk repoints
+# BACKUP_DIR at the module's own subtree before each hook; without it the path
+# resolves to /<name> and the hook silently finds nothing - silently, because a
+# missing sidecar looks the same as an empty one. pt-idle.sh sets BACKUP_DIR by
+# hand and calls the hook directly, so the driver's half of this was untested
+# and a mutation that dropped the repointing survived the whole suite.
+side="$root/side.log"; : > "$side"
+cat > "$PI_TUNE_CHECK_DIR/50-mod-side.sh" <<EOF
+CHECK_ID="mod-side"; CHECK_TITLE="sidecar"; CHECK_RISK="low"
+check_detect() { return 1; }
+check_why() { echo why; }
+check_apply() { printf 'unit-from-apply\n' > "\$BACKUP_DIR/side.list"; }
+check_revert() {
+    if [[ -f "\${BACKUP_DIR:-}/side.list" ]]; then
+        cat "\$BACKUP_DIR/side.list" >> "$side"
+    else
+        echo "SIDECAR-NOT-FOUND" >> "$side"
+    fi
+}
+EOF
+ONLY="mod-side"; registry_load
+do_apply >/dev/null 2>&1
+# Timestamped names sort chronologically, so the newest run is the last one.
+sts=$(find "$PI_TUNE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf "%f
+" | sort | tail -n1)
+chk "sidecar written to subtree" "$(exists "$PI_TUNE_BACKUP_ROOT/$sts/modules/mod-side/side.list")" yes
+do_revert "$sts" >/dev/null 2>&1
+chk "revert hook found it"       "$(cat "$side")"                             unit-from-apply
+ONLY=""; registry_load
+
 exit $fail
