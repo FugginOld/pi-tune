@@ -69,5 +69,16 @@ check_revert() {
 # otherwise NM re-reads powersave=2 and holds it.
 check_revert_post() {
     [[ $HAS_NM -eq 1 ]] && run systemctl reload NetworkManager.service
+
+    # check_apply changes the live radio as well as the config, so revert has to
+    # put the live setting back. check_detect reads the radio, not the file, so
+    # without this the tune goes on reading as satisfied after being undone - on
+    # pi3b-DNS1 it showed as OK in the status table immediately after a revert,
+    # which reads as "the box was always this way" rather than "still in force".
+    # Deleting the drop-in only takes effect on the next reconnect or reboot.
+    local i
+    for i in "${WIFI_IFACES[@]}"; do
+        run iw dev "$i" set power_save on || true
+    done
     return 0
 }

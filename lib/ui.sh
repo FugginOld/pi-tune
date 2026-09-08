@@ -32,6 +32,34 @@ ui_available() { [[ -n $UI_BIN ]]; }
 # ui_overflows <text> <lines> <cols> — is there more text than the box shows?
 # Measured on wrapped lines, not newlines: at these widths one Effect paragraph
 # wraps to four or five, so counting newlines calls an overflowing screen short.
+# How many rows the terminal actually has. Every dialog used to be a constant
+# 22 in a 58-row terminal, so the 17-line status table drew 13 lines and hid
+# pcie-gen3 below a fold with nothing on screen saying a twelfth check existed.
+# Measured on pi3b-DNS1, 2026-09-07.
+ui_rows() {
+    local r=${LINES:-0}
+    [[ $r -gt 0 ]] || r=$(tput lines 2>/dev/null) || r=0
+    [[ $r -gt 0 ]] || r=24          # nothing to ask: the old safe default
+    printf '%s
+' "$r"
+}
+
+# ui_box_height <text> <chrome> - rows for a box holding <text>, where <chrome>
+# is everything else the widget needs: borders, title, buttons, and a menu or
+# checklist's list. Grows with the content and stops at the screen, so a long
+# body scrolls rather than silently ending and a short one draws no dead space.
+ui_box_height() {
+    local n want max
+    n=$(printf '%b
+' "$1" | fold -s -w 74 | wc -l)
+    want=$(( n + $2 ))
+    max=$(( $(ui_rows) - 2 ))
+    [[ $want -gt $max ]] && want=$max
+    [[ $want -lt 10 ]] && want=10
+    printf '%s
+' "$want"
+}
+
 ui_overflows() {
     [[ $(printf '%b\n' "$1" | fold -s -w "$3" | wc -l) -gt $2 ]]
 }
@@ -56,12 +84,12 @@ ui_msgbox() {
         # overflow, and say so in the title, which stays visible and, unlike a
         # leading line of body text, does not push the content down to make room
         # for the notice about content being pushed down.
-        # 22 lines of box less title, borders and button leaves ~16 for text.
-        if ui_overflows "$text" 16 74; then
+        local h; h=$(ui_box_height "$text" 6)
+        if ui_overflows "$text" $(( h - 6 )) 74; then
             title="$title — PgDn for more"
             scroll=("${UI_SCROLL[@]}")
         fi
-        "$UI_BIN" --title "$title" "${scroll[@]}" --msgbox "$text" 22 78
+        "$UI_BIN" --title "$title" "${scroll[@]}" --msgbox "$text" "$h" 78
     else
         printf '\n%b\n\n' "$text"
     fi
@@ -84,11 +112,12 @@ ui_yesno() {
         # grows with the run, and this is the screen the operator approves a
         # mutating run from - the worst one to leave a silent tail on.
         local -a scroll=()
-        if ui_overflows "$text" 14 72; then
+        local h; h=$(ui_box_height "$text" 4)
+        if ui_overflows "$text" $(( h - 4 )) 72; then
             title="$title — PgDn for more"
             scroll=("${UI_SCROLL[@]}")
         fi
-        "$UI_BIN" --title "$title" "${btn[@]}" "${scroll[@]}" --yesno "$text" 18 76
+        "$UI_BIN" --title "$title" "${btn[@]}" "${scroll[@]}" --yesno "$text" "$h" 76
         return $?
     fi
     printf '\n%b\n%s [y/N] ' "$text" "$title" >&2
@@ -116,7 +145,8 @@ ui_menu() {
         # budget shrinks as the menu grows rather than being a fixed number.
         local lh=$count
         [[ $lh -gt 10 ]] && lh=10
-        local budget=$(( 22 - lh - 6 ))
+        local h; h=$(ui_box_height "$text" $(( lh + 6 )))
+        local budget=$(( h - lh - 6 ))
         [[ $budget -lt 3 ]] && budget=3
 
         local -a scroll=()
@@ -127,7 +157,7 @@ ui_menu() {
 
         local out rc
         out=$("$UI_BIN" --title "$title" "${scroll[@]}" \
-              --menu "$text" 22 78 "$lh" "${items[@]}" 3>&1 1>&2 2>&3)
+              --menu "$text" "$h" 78 "$lh" "${items[@]}" 3>&1 1>&2 2>&3)
         rc=$?
         [[ $rc -eq 0 ]] && printf '%s\n' "$out"
         return $rc
@@ -167,8 +197,12 @@ ui_checklist() {
 
     if ui_available; then
         local out rc
+        local lh=$(( ${#items[@]} / 3 ))
+        [[ $lh -gt 12 ]] && lh=12
+        [[ $lh -lt 1 ]] && lh=1
+        local h; h=$(ui_box_height "$text" $(( lh + 6 )))
         out=$("$UI_BIN" --title "$title" --separate-output \
-              --checklist "$text" 22 78 12 "${items[@]}" 3>&1 1>&2 2>&3)
+              --checklist "$text" "$h" 78 "$lh" "${items[@]}" 3>&1 1>&2 2>&3)
         rc=$?
         [[ $rc -ne 0 ]] && return 1
         printf '%s\n' "$out" | tr -d '"' | grep -v '^$'
