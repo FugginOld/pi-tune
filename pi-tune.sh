@@ -1019,4 +1019,13 @@ main() {
     esac
 }
 
-main "$@"
+# Run only when executed, not when sourced. Six tests used to reach these
+# functions by sed-deleting this line into a temp copy - a test surface made
+# of a regex on the last line of the file, which pt-revert.sh had to guard
+# against in case the line was ever renamed.
+# An if, not a && - sourcing must return 0. As a compound the last line's
+# false condition becomes the script's exit status, so a test that sources
+# the driver would see rc 1 and, under set -e, stop there.
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
+    main "$@"
+fi

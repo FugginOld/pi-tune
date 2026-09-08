@@ -8,13 +8,12 @@ has() { case "$2" in *"$3"*) echo yes ;; *) echo no ;; esac; }
 # they are made of: which rows get offered, what the status table says, and that
 # the loop goes where NEXT_SCREEN points.
 root=$(mktemp -d)
-drv="$1/.pt-screens-test.sh"; trap 'rm -f "$drv"; rm -rf "$root"' EXIT
-sed '$ { /^main "\$@"$/d; }' pi-tune.sh > "$drv"
+trap 'rm -rf "$root"' EXIT
 
 export PI_TUNE_BACKUP_ROOT="$root/backups"
 NO_TUI=1
 # shellcheck disable=SC1090
-. "$drv"
+. ./pi-tune.sh
 NO_TUI=1; VERBOSE=0; ONLY=""
 
 # --- 1. Apply is offered to root only ---------------------------------------

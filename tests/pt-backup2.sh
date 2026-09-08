@@ -10,8 +10,7 @@ exists() { [ -e "$1" ] && echo yes || echo no; }
 # module wrote it" - so backups grow a per-module level and the walk moves one
 # level down. This drives the real do_apply and do_revert against temp paths.
 root=$(mktemp -d)
-drv="$1/.pt-backup2-test.sh"; trap 'rm -f "$drv"; rm -rf "$root"' EXIT
-sed '$ { /^main "\$@"$/d; }' pi-tune.sh > "$drv"
+trap 'rm -rf "$root"' EXIT
 
 export PI_TUNE_BACKUP_ROOT="$root/backups"
 export PI_TUNE_CHECK_DIR="$root/checks"
@@ -33,7 +32,7 @@ mkmod 10 mod-a "$tgt/a.conf"
 mkmod 20 mod-b "$tgt/b.conf"
 
 # shellcheck disable=SC1090
-. "$drv"
+. ./pi-tune.sh
 NO_TUI=1; ASSUME_YES=1; DRY_RUN=0; VERBOSE=0; ONLY=""
 PI_MODEL="test"; DISTRO_PRETTY="test"; RAM_MB=1; CPU_COUNT=1
 ROOT_SRC=/dev/x; ROOT_FSTYPE=ext4; ROOT_MEDIA=""

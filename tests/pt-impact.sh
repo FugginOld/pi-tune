@@ -1,10 +1,8 @@
 set -uo pipefail
 cd "$1" || exit 1
 
-drv=".pt-impact-test.sh"; trap 'rm -f "$drv"' EXIT
-sed '$ { /^main "\$@"$/d; }' pi-tune.sh > "$drv"
 DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""; ASSUME_YES=0
-. "./$drv"
+. ./pi-tune.sh
 ui_init; probe_host
 
 fail=0
@@ -19,6 +17,17 @@ for f in checks/*.sh; do
 done
 chk "every module has impact text" "${missing:-none}" none
 chk "module count" "$(ls checks/*.sh | wc -l)" 12
+
+# 1b. The driver must define its functions when sourced and run nothing. Six
+#     tests used to get this by sed-deleting `main "$@"` into a temp copy - a
+#     test surface made of a regex on the file's last line. Measured in a
+#     subshell, because this file has already sourced the driver above.
+chk "sourcing runs nothing"  "$(bash -c '. ./pi-tune.sh 2>&1')"                     ""
+chk "sourcing returns 0"     "$(bash -c '. ./pi-tune.sh >/dev/null 2>&1; echo $?')" 0
+chk "sourcing defines apply" "$(bash -c '. ./pi-tune.sh >/dev/null 2>&1; declare -F apply_ids >/dev/null && echo yes || echo no')" yes
+# The control: executing it still runs main. Without this the three above pass
+# for a driver whose entry point was deleted rather than guarded.
+chk "executing still runs"   "$(bash ./pi-tune.sh --list 2>/dev/null | wc -l)"      12
 
 # 2. Wrapped output must fit whiptail's 78-column box.
 over=0

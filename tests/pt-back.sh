@@ -5,8 +5,7 @@ root=$(mktemp -d)
 # Drive do_apply over the plain-text fallback with a scripted keystroke stream.
 # Sequence: tick 1 and 2 -> answer No (Back) -> checklist must reopen with BOTH
 # still ticked -> press Enter to take those defaults -> answer y.
-drv="$1/.pt-back-test.sh"; trap 'rm -f "$drv"; rm -rf "$root"' EXIT
-sed '$ { /^main "\$@"$/d; }' pi-tune.sh > "$drv"
+trap 'rm -rf "$root"' EXIT
 
 export PI_TUNE_CHECK_DIR="$root/checks"; mkdir -p "$PI_TUNE_CHECK_DIR"
 for n in 1 2 3; do
@@ -21,7 +20,7 @@ EOF
 done
 
 BACKUP_ROOT="$root/backups"; DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""; ASSUME_YES=0
-. "$drv"
+. ./pi-tune.sh
 BACKUP_ROOT="$root/backups"; PI_MODEL="test"; DISTRO_PRETTY="test"; RAM_MB=1; CPU_COUNT=1
 ROOT_SRC=/dev/x; ROOT_FSTYPE=ext4; CRITICAL_UNITS=(); NEEDS_MANUAL=(); NEEDS_REBOOT=0
 unit_active() { return 0; }

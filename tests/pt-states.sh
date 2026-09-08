@@ -8,13 +8,12 @@ chk() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2' wa
 # pi-tune never touched; journald-cap reads satisfied because we capped it.
 # Only the second is revertable, so only the second is DONE.
 root=$(mktemp -d)
-drv="$1/.pt-states-test.sh"; trap 'rm -f "$drv"; rm -rf "$root"' EXIT
-sed '$ { /^main "\$@"$/d; }' pi-tune.sh > "$drv"
+trap 'rm -rf "$root"' EXIT
 
 export PI_TUNE_BACKUP_ROOT="$root/backups"
 NO_TUI=1
 # shellcheck disable=SC1090
-. "$drv"
+. ./pi-tune.sh
 
 # label <rc> <id> — rendered state word, trimmed. Colours are empty off a tty.
 label() { local s; s=$(state_label "$1" "${2:-}"); echo "${s%"${s##*[![:space:]]}"}"; }

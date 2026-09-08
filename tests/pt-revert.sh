@@ -21,10 +21,8 @@ FAKE
 
 # Source the driver with its self-invocation stripped, so do_revert is the real
 # function under test rather than a copy of it.
-drv="$repo/.pt-driver-test.sh"; trap 'rm -f "$drv"' EXIT; sed "$ { /^main \"\$@\"$/d; }" pi-tune.sh > "$drv"
-tail -1 "$drv" | grep -q '^main' && { echo "FAIL could not strip main"; exit 1; }
 BACKUP_ROOT="$root/backups"; DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""
-. "$drv"
+. ./pi-tune.sh
 BACKUP_ROOT="$root/backups"          # driver re-defaults it on source
 scan_checks
 
