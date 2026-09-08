@@ -94,4 +94,25 @@ applied_index; rc=$?
 chk "missing root: rc 0"          "$rc"                      0
 chk "missing root: no DONE"       "$(label 0 journald-cap)"  "OK"
 
+
+# --- the report writes to stdout, and the palette is chosen from stderr -------
+# util.sh sets the colours from [[ -t 2 ]], because info/warn/err/dbg all write
+# to stderr. print_report writes to stdout. Piping stdout while stderr is still
+# a terminal therefore put escapes into the report - and --fleet consumes it
+# over SSH, HOWTO pipes it to grep.
+#
+# Forced non-empty on purpose: off a terminal the palette is already blank, so
+# this assertion would agree with the broken code and the fixed one equally.
+C_RED=$'\033[31m'; C_YEL=$'\033[33m'; C_GRN=$'\033[32m'
+C_DIM=$'\033[2m';  C_BLD=$'\033[1m';  C_OFF=$'\033[0m'
+esc=$(printf '\033')
+
+# $( ) makes stdout a pipe, which is the case under test.
+out=$(print_report 2>/dev/null)
+chk "no escapes down a pipe"  "$(printf '%s' "$out" | grep -c "$esc")"  0
+# Every finding must still start a line - the symptom was one row swallowed by
+# the escape left dangling after the row above it.
+chk "every finding starts a line" "$(printf '%s\n' "$out" | grep -c '^  \[')" \
+                                  "$(printf '%s\n' "$out" | grep -c '\] [a-z]')"
+
 exit $fail

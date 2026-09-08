@@ -229,6 +229,17 @@ review_text() {
 
 print_report() {
     local pending=0 id st impact
+    # The palette is chosen from stderr (lib/util.sh), which is right for info,
+    # warn, err and dbg - they all write there. This function writes to stdout,
+    # a different fd, and stdout is a pipe whenever the report is consumed:
+    # --fleet ships it over SSH, and `--report --no-tui | grep` is in HOWTO.
+    # Piping stdout while stderr is still a terminal put raw escapes in the
+    # output, which is how a `grep '^  \['` came back one row short - the reset
+    # after a Why/Effect block landed at the head of the next finding.
+    # Blanked locally, which bash's dynamic scope carries into state_label.
+    if [[ ! -t 1 ]]; then
+        local C_BLD='' C_DIM='' C_OFF='' C_GRN='' C_YEL='' C_RED=''
+    fi
     printf '\n%spi-tune %s%s\n\n' "$C_BLD" "$PI_TUNE_VERSION" "$C_OFF"
     probe_summary | sed 's/^/  /'
     printf '\n  %sFindings%s\n\n' "$C_BLD" "$C_OFF"
