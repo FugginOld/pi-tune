@@ -326,6 +326,26 @@ Exercised end to end:
   the body of a menu — worth recording, because a menu's list is focusable and
   `--msgbox`, where focus sits on the button, was the case measured earlier.
 
+Closed 2026-09-07, in a campaign to clear this list (`docs/plan-hw-gaps.md`):
+
+- **Restoring a modified file from the `files/` mirror.** An `/etc/docker/
+  daemon.json` written by hand with 4-space indent, overwritten by
+  `docker-log-caps`' merge, then reverted: byte-identical to a copy taken
+  beforehand. A restore that merely re-serialised valid JSON would have shown
+  as a different hash, which is why the fixture was indented unusually.
+- **The `post.sha256` drift guard, on a real file.** The same file edited after
+  the apply: revert warned, named it, and left the edit on disk.
+- **`wifi-powersave` apply**, and the defect it exposed - it applied live and
+  persisted but reverted only the persisted half, so the status table read `OK`
+  while the setting was still in force. Now symmetric, and verified both ways:
+  radio `off` and `DONE` after apply, `on` and `TUNE` after revert.
+- **The Revert screen**, the one phase-4 screen that writes. Listed per-tune and
+  whole-run entries, undid only the ticked one, returned to host.
+- **The health gate firing, and its rollback.** Provoked with a throwaway module
+  that stops `docker.service`. The gate caught it despite systemd warning that
+  `docker.socket` was still active, the rollback dialog appeared, and the
+  module's `check_revert` restarted docker with its containers.
+
 Not verified, and not inferable from the above:
 
 - **Restoring a modified file from the `files/` mirror.** Both reverts here
