@@ -43,7 +43,25 @@ is flat and the files need moving into `lib/` and `checks/`.
 ./pi-tune.sh
 ```
 
-Reads only. You get the host fingerprint, then the findings:
+Reads only, and needs no root. On a terminal you get a menu; over a pipe, in CI
+or under `--fleet` you get the same findings as plain text. Nothing about which
+one you get is a flag — it is whether there is a terminal and a whiptail to
+draw on.
+
+The menu opens on the host it found, and offers `Tune`, `Quit`, and `Revert`
+when there is something left to undo. `Tune` leads to a table of every check
+and where this host stands, then to the selection, then to a confirm offering
+`Apply`, `Dry run` and `Back`. Browsing all of that needs no root; without it
+the `Apply` row is simply absent and the confirm says so, rather than the tool
+refusing to start.
+
+To skip the menu and get the text — what CI and `--fleet` run:
+
+```sh
+./pi-tune.sh --report --no-tui
+```
+
+Either way the findings read the same:
 
 ```
   [DONE] journald-cap               Cap systemd journal size

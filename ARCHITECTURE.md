@@ -278,6 +278,17 @@ Exercised end to end:
   behind empty.
 - TUI: review, checklist and confirm dialogs; the scroll flag passed only on
   overflow, confirmed by its absence on a one-change review.
+- The five screens (plan phase 4), walked as root and again unprivileged: host,
+  status, selection, the three-row confirm, and finish. Unprivileged, the
+  confirm offers `Dry run` and `Back` only. `NEEDS_MANUAL` reaches the operator
+  on the finish screen instead of scrolling past on stdout, which is what it was
+  added for.
+  Two things only the box could show, both since fixed: the dry-run diff printed
+  to the terminal and was painted over by the next dialog a moment later, and
+  the text captured from `apply_ids` still carried the colour escapes, which
+  whiptail drew as `^[[32m`. Colour is decided once at load from `[[ -t 1 ]]`,
+  so capturing it inside a run that began on a terminal keeps it — no test that
+  runs off a terminal can see this, because there the escapes are empty strings.
 - Four states (plan phase 1), on the pair that makes them distinguishable:
   `journald-cap` reads `DONE` because pi-tune capped it, `root-noatime` reads
   `OK` because the image already mounts that way. A three-state design would
