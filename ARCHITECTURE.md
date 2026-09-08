@@ -346,17 +346,46 @@ Closed 2026-09-07, in a campaign to clear this list (`docs/plan-hw-gaps.md`):
   `docker.socket` was still active, the rollback dialog appeared, and the
   module's `check_revert` restarted docker with its containers.
 
+- **`root-noatime` apply and revert**, the boot-critical file. `/etc/fstab` had
+  `noatime` removed by hand to reach the path, applied, reverted, and restored -
+  `findmnt --verify` clean at every step and the file byte-identical to a copy
+  taken first.
+- **`zram-swap` apply and revert**, reached by `swapoff`-ing the stock zram
+  rather than disabling the generator unit. Also caught a module *failing*
+  mid-apply, which had never run either: `applied 0 of 1`, the error named, and
+  a rollback point still written for the partial changes.
+- **The health gate's rollback**, above.
+- **The finish screen's `Reboot now` row**, which had never appeared - the only
+  reboot-requiring check was already `DONE` before the screens existed.
+- **`cmdline_add` under schema 2.** `usb-autosuspend` reverted and re-applied:
+  the token appended with a single space, the rest of the line byte-identical,
+  and `modules/usb-autosuspend/files/boot/firmware/cmdline.txt` holding the
+  pre-token original. The vfat backup ran before the write. This was previously
+  inferred from a backup an older version had taken; it is now observed.
+
+Three findings that are not bugs but will mislead a reader who does not know:
+
+- **`zram-tools` cannot initialise `/dev/zram0` on an image that already ships
+  zram.** `mkswap: cannot open /dev/zram0: Device or resource busy` - the stock
+  `systemd-zram-setup@zram0.service` holds it. Unreachable in normal use, since
+  `check_detect` returns satisfied on any box that already has zram, but the
+  apply path is not safe to force there.
+- **`zram-swap`'s `PERCENT=50` did not size the device.** zram-tools reused the
+  905 MB device the generator had already made rather than resizing it, so the
+  Effect text's "half of physical memory" was not what the box got.
+- **`usb-autosuspend` reads `OK` immediately after being reverted.**
+  `check_detect`'s last fallback reads
+  `/sys/module/usbcore/parameters/autosuspend`, and the running kernel still
+  carries the parameter the *previous* boot's cmdline gave it. The apply never
+  touched the runtime, so this is the detect reporting effect rather than
+  configuration; it self-corrects on reboot. Deliberately left as is - the
+  alternative is a detect that ignores a genuinely disabled autosuspend.
+
 Not verified, and not inferable from the above:
 
-- **Restoring a modified file from the `files/` mirror.** Both reverts here
-  removed a created file or reset unit state. Every check that edits a
-  pre-existing file (`root-noatime` on `/etc/fstab`, `usb-autosuspend`,
-  `docker-log-caps` merging into an existing `daemon.json`) reports `OK` or
-  `N/A` on this host, so the restore-original-bytes path has never run.
 - **Anything Pi 5.** `pcie-gen3` has never returned anything but `N/A`, and NVMe
-  root is inferred from that check existing rather than observed.
-- `wifi-powersave` and `root-noatime` applies. The first reloads NetworkManager,
-  which is in the guarded set; check which interface carries the session first.
+  root is inferred from that check existing rather than observed. This is the
+  only item left on this list.
 
 ## Accepted limitations
 

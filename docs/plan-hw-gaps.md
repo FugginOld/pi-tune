@@ -1,6 +1,9 @@
 # Plan - close the hardware gaps on pi3b-DNS1
 
-Status: **not started**. Written 2026-09-07 against `pi-tune` on `dev`.
+Status: **done** except the post-reboot check. Every step passed; the results
+and the three findings are recorded in ARCHITECTURE.md. Three defects were
+found and fixed along the way: dialog geometry, wifi-powersave's half-revert,
+and sysctl values surviving a revert. Written 2026-09-07 against `pi-tune` on `dev`.
 Everything here is a box exercise, not a code change. Code changes only happen
 if one of these finds a defect.
 
