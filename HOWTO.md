@@ -170,6 +170,19 @@ overwritten or deleted. You get a partial revert and a message saying which
 files, which is better than silently destroying an edit that was not ours. Read
 the warnings — the rest of the revert still ran.
 
+A revert marks itself done, and a point already undone is not undone twice —
+`--revert` on it says `already reverted` and stops. That is what you want almost
+always, but note the edge: if a restore failed partway (a read-only mount, a
+full disk, an immutable file — the revert warns `could not restore` and carries
+on), the point is still marked. To retry it, delete the marker by hand:
+
+```sh
+sudo rm /var/backups/pi-tune/<TS>/reverted            # whole run
+sudo rm /var/backups/pi-tune/<TS>/modules/<id>/reverted   # one tune
+```
+
+Read the warnings from a revert before assuming it completed.
+
 Backups live in `/var/backups/pi-tune/`, override with `PI_TUNE_BACKUP_ROOT`.
 They are never pruned; delete old timestamps by hand.
 

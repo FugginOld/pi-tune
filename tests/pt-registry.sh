@@ -64,6 +64,25 @@ chk "unknown field rc"        "$(registry_get beta nosuchfield >/dev/null 2>&1; 
 # Only detect==1 is offered. beta is satisfied, gamma does not apply here.
 chk "tunables are state 1"    "$(registry_tunables | tr '\n' ' ')"      "alpha delta "
 chk "rows are triples"        "$(( $(registry_checklist_rows | wc -l) % 3 ))"  0
+# With single-line titles that check is a tautology - the printf structurally
+# emits 3n lines. A title carrying a newline is what can break the stride, and
+# the module author picks the title.
+cat > "$cdir/50-multi.sh" <<'MEOF'
+CHECK_ID="multi"; CHECK_RISK="low"
+CHECK_TITLE="first line
+second line"
+check_detect() { return 1; }
+check_why()    { echo why; }
+check_impact() { echo impact; }
+MEOF
+registry_load
+chk "newline title keeps stride" "$(( $(registry_checklist_rows | wc -l) % 3 ))" 0
+chk "one row per tunable still"  "$(( $(registry_checklist_rows | wc -l) / 3 ))" 3
+# The failure this prevents: the following item's tag read as a stray "ON".
+mapfile -t rows < <(registry_checklist_rows)
+chk "tags land on the stride"    "${rows[0]} ${rows[3]} ${rows[6]}"             "alpha delta multi"
+rm -f "$cdir/50-multi.sh"
+registry_load
 chk "one row per tunable"     "$(( $(registry_checklist_rows | wc -l) / 3 ))"  2
 chk "row carries the risk"    "$(registry_checklist_rows | sed -n '2p')"       "[low] title of alpha"
 chk "low is pre-ticked"       "$(registry_checklist_rows | sed -n '3p')"       ON
@@ -80,6 +99,17 @@ ONLY="alpha,delta"
 registry_load
 chk "only filters"            "$(registry_ids | tr '\n' ' ')"           "alpha delta "
 chk "filtered-out id is gone" "$(registry_has beta && echo yes || echo no)"    no
+
+# --- 6. an empty registry prints nothing ------------------------------------
+# printf runs its format once even with no arguments, so the obvious one-liner
+# emitted a blank line here. That blank id reached --list as an empty array
+# subscript: two "REG_STATE: bad array subscript" errors and a row of padding.
+ONLY="nosuchid"
+registry_load
+chk "empty registry has no ids" "$(registry_ids | wc -l)"                       0
+chk "and no blank line"         "$(registry_ids | od -c | head -1 | wc -l)"     1
+chk "tunables empty too"        "$(registry_tunables | wc -l)"                  0
+chk "rows empty too"            "$(registry_checklist_rows | wc -l)"            0
 ONLY=""
 
 exit $fail

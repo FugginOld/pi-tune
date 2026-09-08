@@ -89,7 +89,14 @@ registry_load() {
     shopt -u nullglob
 }
 
-registry_ids() { printf '%s\n' ${REG_IDS[@]+"${REG_IDS[@]}"}; }
+# An empty registry prints nothing. printf runs its format once even with no
+# arguments, so the obvious one-liner emitted a blank line, and a blank id read
+# back as an empty subscript - `--list --only nosuchid` printed two `REG_STATE:
+# bad array subscript` errors and a row of padding.
+registry_ids() {
+    [[ ${#REG_IDS[@]} -gt 0 ]] || return 0
+    printf '%s\n' "${REG_IDS[@]}"
+}
 
 registry_has() { [[ -n ${REG_STATE[${1:-}]:-} ]]; }
 
@@ -122,13 +129,18 @@ registry_tunables() {
 # registry_checklist_rows — tag/label/default triples for every tunable, one per
 # line. do_apply and screen_select built this identically, eight lines each.
 registry_checklist_rows() {
-    local id risk default
+    local id risk title default
     while read -r id; do
         [[ -n $id ]] || continue
-        risk=${REG_RISK[$id]}
+        # Three lines per item, so a newline inside a title or risk would shift
+        # every triple after it and the caller's stride-3 read would take one
+        # item's tag from another's label. The module author picks these strings;
+        # the registry is where that stops being their problem.
+        risk=${REG_RISK[$id]//$'\n'/ }
+        title=${REG_TITLE[$id]//$'\n'/ }
         default=OFF
         [[ $risk == low ]] && default=ON
-        printf '%s\n[%s] %s\n%s\n' "$id" "$risk" "${REG_TITLE[$id]}" "$default"
+        printf '%s\n[%s] %s\n%s\n' "$id" "$risk" "$title" "$default"
     done < <(registry_tunables)
 }
 
@@ -475,6 +487,10 @@ declare -a REVERT_SUBS=()
 # _revert_plan <dir> [id...] — fill REVERT_SUBS with what to undo, in undo
 # order. Fills an array rather than printing, because info and warn go to the
 # same stdout a printed list would use.
+#
+# Ids are silently ignored under schema 1, which has no per-module level to
+# narrow to. do_revert refuses that combination before calling here; a new
+# caller that skips do_revert would quietly revert the whole run instead.
 _revert_plan() {
     local dir=$1; shift
     local -a want=("$@") ids=()
@@ -545,7 +561,7 @@ _revert_walk() {
             while IFS= read -r -d '' src; do
                 dest="${src#"$sub/files"}"
                 if _drifted "$sub" "$dest"; then
-                    warn "$dest changed since it was applied — left as it is"
+                    warn "$dest changed since $(basename "$sub") was applied — left as it is"
                     continue
                 fi
                 info "restoring $dest"
@@ -557,7 +573,7 @@ _revert_walk() {
             while read -r pth; do
                 [[ -n $pth && -e $pth ]] || continue
                 if _drifted "$sub" "$pth"; then
-                    warn "$pth changed since it was applied — left as it is"
+                    warn "$pth changed since $(basename "$sub") was applied — left as it is"
                     continue
                 fi
                 info "removing $pth"
