@@ -71,8 +71,24 @@ touch "$PI_TUNE_BACKUP_ROOT/20260102-000000/reverted"
 chk "reverted run drops out"    "$(has x "$(revert_items)" '20260102')"  no
 
 # --- 3. the status table ----------------------------------------------------
-C_ID=(a b c d); C_TITLE=(ta tb tc td); C_RISK=(low low low low)
-C_STATE=(0 1 2 0); C_FILE=(f f f f); C_WHY=(w w w w); C_IMPACT=(i i i i)
+# One fixture module per state the table has to render. Built as real check
+# files and loaded through registry_load, because the arrays behind the registry
+# are its implementation - a test that assigns them directly would keep passing
+# after the registry changed shape underneath it.
+cdir="$root/checks"; mkdir -p "$cdir"
+mkcheck() {                              # mkcheck <n> <id> <detect-rc>
+    cat > "$cdir/$1-$2.sh" <<EOF
+CHECK_ID="$2"; CHECK_TITLE="t$2"; CHECK_RISK="low"
+check_detect() { return $3; }
+check_why() { echo w; }
+check_impact() { echo i; }
+EOF
+}
+mkcheck 10 a 0
+mkcheck 20 b 1
+mkcheck 30 c 2
+mkcheck 40 d 0
+CHECK_DIR="$cdir"; registry_load
 APPLIED=(["d"]=20260101-000000)   # quoted: an unquoted subscript reads as arithmetic (SC2154)
 # Force colour on. Off a tty util.sh leaves C_* empty, so state_label would emit
 # no escapes either and the assertion below could not fail - it would agree with

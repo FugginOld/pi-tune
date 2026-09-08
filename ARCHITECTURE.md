@@ -29,8 +29,37 @@ function, reinstalls safe defaults, clears `CHECK_ID`/`CHECK_TITLE` and sets
 `CHECK_RISK=medium`, then sources. A module that omits `check_revert` gets the
 no-op — never the previous module's. The price of sharing one shell is that a
 module can clobber a driver global. Module-private state is prefixed with `_`
-(`_jconf`, `_gov`, `_unit`, `_candidates`) and modules never assign to a `C_*`,
-`PI_*`, `HAS_*`, `ROOT_*` or `NEEDS_*` name.
+(`_jconf`, `_gov`, `_unit`, `_candidates`) and modules never assign to a
+`REG_*`, `PI_*`, `HAS_*`, `ROOT_*` or `NEEDS_*` name.
+
+### The registry's own interface
+
+`registry_load` scans, runs every `check_detect`, and **replaces** what was
+there. Everything else asks it about an id:
+
+| call | answers |
+|---|---|
+| `registry_ids` | every id, in load order |
+| `registry_has <id>` | rc 0 or 1 |
+| `registry_get <id> <field>` | title, risk, file, why, impact — rc 1 on an unknown id |
+| `registry_state <id>` | the detect result, 0/1/2 |
+| `registry_tunables` | the ids whose detect said 1 |
+| `registry_checklist_rows` | tag/label/default triples for those ids |
+
+`REG_IDS` and the six associative arrays behind these are implementation.
+Nothing outside the registry reads them, and tests drive it through a fixture
+`CHECK_DIR` rather than by assigning to them.
+
+This was seven parallel arrays — `C_ID`, `C_TITLE`, `C_RISK`, `C_FILE`, `C_WHY`,
+`C_IMPACT`, `C_STATE` — indexed by position from fourteen places, with an
+`index_of` that turned an id into a subscript. A one-element skew between any
+two of them meant `apply_ids` sourced one module's file under another's name,
+and nothing validated the lengths. Keyed by id, that is not expressible.
+
+Replacing rather than appending is what makes a reload safe. `screen_revert`
+previously rebuilt only the applied index and left every `check_detect` result
+stale, because a second scan would have doubled all seven arrays; it now
+reloads the registry, so a tune just undone stops reading `DONE`.
 
 ## The three-state detect contract
 
@@ -58,7 +87,7 @@ and only one of them is safe to act on. `root-noatime` returning `2` when
 ## Lifecycle
 
 **Report** (`--report`, default, no root):
-`ui_init` -> `probe_host` -> `scan_checks` (source each module, run
+`ui_init` -> `probe_host` -> `registry_load` (source each module, run
 `check_detect`, `check_why` and `check_impact`, record state) -> `print_report`.
 
 **Apply** (`--apply`, root, or `--dry-run` without):
@@ -84,7 +113,7 @@ report, then `do_apply`:
 8. Print `NEEDS_MANUAL` items and the reboot flag.
 
 **Revert** (`--revert TS|last`, root):
-`scan_checks` runs first — revert needs the registry to map an id back to a
+`registry_load` runs first — revert needs the registry to map an id back to a
 file. `BACKUP_DIR` is pointed at the rollback point so modules can read back
 sidecars they wrote during apply (`idle-services` stores the unit list it
 disabled). Then, in order:

@@ -39,7 +39,7 @@ ROOT_SRC=/dev/x; ROOT_FSTYPE=ext4; ROOT_MEDIA=""
 CRITICAL_UNITS=(); NEEDS_MANUAL=(); NEEDS_REBOOT=0
 unit_active() { return 0; }
 ui_init
-scan_checks
+registry_load
 do_apply >/dev/null 2>&1
 
 ts=$(basename "$(find "$PI_TUNE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | head -n1)")
@@ -123,8 +123,8 @@ check_detect() { return 0; }
 check_revert() { echo "mod-$n" >> "$log"; }
 EOF
 done
-C_ID=(); C_TITLE=(); C_RISK=(); C_FILE=(); C_WHY=(); C_IMPACT=(); C_STATE=()
-scan_checks
+# registry_load replaces, so a re-scan needs no hand-clearing of seven names.
+registry_load
 
 ord="$PI_TUNE_BACKUP_ROOT/20260202-000000"
 mkdir -p "$ord/modules/mod-x" "$ord/modules/mod-y"
@@ -201,8 +201,7 @@ cat > "$PI_TUNE_CHECK_DIR/45-mod-sys.sh" <<'EOF'
 CHECK_ID="mod-sys"; CHECK_TITLE="module sys"; CHECK_RISK="low"
 check_detect() { return 0; }
 EOF
-C_ID=(); C_TITLE=(); C_RISK=(); C_FILE=(); C_WHY=(); C_IMPACT=(); C_STATE=()
-scan_checks
+registry_load
 : > "$root/sysctl.log"
 do_revert 20260303-000000 >/dev/null 2>&1
 chk "revert restores the value" "$(has x "$(cat "$root/sysctl.log" 2>/dev/null)" 'vm.swappiness=60')" yes

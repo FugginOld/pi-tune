@@ -24,7 +24,7 @@ FAKE
 BACKUP_ROOT="$root/backups"; DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""
 . ./pi-tune.sh
 BACKUP_ROOT="$root/backups"          # driver re-defaults it on source
-scan_checks
+registry_load
 
 fail=0
 chk() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2' want '$3'"; fail=1; fi; }

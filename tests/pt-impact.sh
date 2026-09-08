@@ -41,8 +41,8 @@ chk "no wrapped line over 72 cols" "$over" 0
 
 # 3. review_text structure: one Why and one Effect per index, and continuation
 #    lines aligned under the label at column 10.
-scan_checks
-p=(); for i in "${!C_ID[@]}"; do p+=("$i"); done          # all 12
+registry_load
+mapfile -t p < <(registry_ids)                            # all 12
 out=$(review_text "${p[@]}")
 chk "one Why per check"    "$(grep -c '^  Why:   ' <<<"$out")"    12
 chk "one Effect per check" "$(grep -c '^  Effect:' <<<"$out")"    12
@@ -51,9 +51,17 @@ chk "continuations at col 10" "$(grep -c '^          [^ ]' <<<"$out" | awk '$1>0
 chk "no line over 72 cols" "$(awk 'length($0)>72' <<<"$out" | wc -l)" 0
 
 # 4. A module with no check_impact must degrade to Why-only, not print an
-#    empty Effect label.
-C_IMPACT[0]=""
-out=$(review_text 0)
+#    empty Effect label. Driven through a fixture check dir rather than by
+#    poking the registry's arrays - those are its implementation now, and a test
+#    that reaches past the interface stops describing what callers can see.
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+cat > "$tmp/10-bare.sh" <<'EOF'
+CHECK_ID="bare"; CHECK_TITLE="no impact text"; CHECK_RISK="low"
+check_detect() { return 1; }
+check_why() { echo "a reason"; }
+EOF
+CHECK_DIR="$tmp"; registry_load
+out=$(review_text bare)
 chk "empty impact omits Effect" "$(grep -c '^  Effect:' <<<"$out")" 0
 chk "empty impact keeps Why"    "$(grep -c '^  Why:   ' <<<"$out")" 1
 

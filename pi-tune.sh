@@ -33,7 +33,14 @@ FLEET=""
 
 # --- check registry ---------------------------------------------------------
 
-declare -a C_ID=() C_TITLE=() C_RISK=() C_FILE=() C_WHY=() C_IMPACT=() C_STATE=()
+# The registry is one module: load it, ask it for ids, ask it about an id. The
+# arrays below are its implementation and nothing outside these functions reads
+# them. They used to be seven parallel arrays indexed by position from fourteen
+# places, where a one-element skew meant index_of returned an index apply_ids
+# then used against C_FILE - sourcing the wrong module under the right label.
+# Keyed by id, that failure cannot be expressed.
+declare -a REG_IDS=()
+declare -A REG_TITLE=() REG_RISK=() REG_FILE=() REG_WHY=() REG_IMPACT=() REG_STATE=()
 
 # load_check <file> — source a module in isolation. Functions and metadata are
 # reset first so a module that omits one can't inherit the previous module's.
@@ -53,8 +60,15 @@ load_check() {
     return 0
 }
 
-scan_checks() {
+# registry_load — scan CHECK_DIR, run every detect, replace whatever was here.
+# Replaces rather than appends, so calling it twice is a refresh and not a
+# doubling. That is what lets a screen re-read the world after changing it; the
+# append-only version is why screen_revert could only rebuild the applied index
+# and had to leave the detect results stale.
+registry_load() {
     local f rc
+    REG_IDS=()
+    REG_TITLE=(); REG_RISK=(); REG_FILE=(); REG_WHY=(); REG_IMPACT=(); REG_STATE=()
     shopt -s nullglob
     for f in "$CHECK_DIR"/*.sh; do
         load_check "$f" || continue
@@ -63,24 +77,59 @@ scan_checks() {
         fi
         rc=0
         check_detect || rc=$?
-        C_ID+=("$CHECK_ID")
-        C_TITLE+=("$CHECK_TITLE")
-        C_RISK+=("$CHECK_RISK")
-        C_FILE+=("$f")
-        C_WHY+=("$(check_why 2>/dev/null)")
-        C_IMPACT+=("$(check_impact 2>/dev/null)")
-        C_STATE+=("$rc")
+        REG_IDS+=("$CHECK_ID")
+        REG_TITLE[$CHECK_ID]=$CHECK_TITLE
+        REG_RISK[$CHECK_ID]=$CHECK_RISK
+        REG_FILE[$CHECK_ID]=$f
+        REG_WHY[$CHECK_ID]=$(check_why 2>/dev/null)
+        REG_IMPACT[$CHECK_ID]=$(check_impact 2>/dev/null)
+        REG_STATE[$CHECK_ID]=$rc
         dbg "$CHECK_ID -> state $rc"
     done
     shopt -u nullglob
 }
 
-index_of() {
-    local want=$1 i
-    for i in "${!C_ID[@]}"; do
-        [[ ${C_ID[$i]} == "$want" ]] && { echo "$i"; return 0; }
+registry_ids() { printf '%s\n' ${REG_IDS[@]+"${REG_IDS[@]}"}; }
+
+registry_has() { [[ -n ${REG_STATE[${1:-}]:-} ]]; }
+
+# registry_get <id> <field> — title | risk | file | why | impact. An unknown id
+# is rc 1, not an empty string: the positional version silently handed back a
+# neighbour's field, and that is the bug this module exists to make unsayable.
+registry_get() {
+    registry_has "$1" || return 1
+    case "$2" in
+        title)  printf '%s\n' "${REG_TITLE[$1]}" ;;
+        risk)   printf '%s\n' "${REG_RISK[$1]}" ;;
+        file)   printf '%s\n' "${REG_FILE[$1]}" ;;
+        why)    printf '%s\n' "${REG_WHY[$1]}" ;;
+        impact) printf '%s\n' "${REG_IMPACT[$1]}" ;;
+        *)      return 1 ;;
+    esac
+}
+
+registry_state() { registry_has "$1" || return 1; printf '%s\n' "${REG_STATE[$1]}"; }
+
+# registry_tunables — ids whose detect said "applies here and is not set".
+registry_tunables() {
+    local id
+    for id in ${REG_IDS[@]+"${REG_IDS[@]}"}; do
+        [[ ${REG_STATE[$id]} -eq 1 ]] && printf '%s\n' "$id"
     done
-    return 1
+    return 0
+}
+
+# registry_checklist_rows — tag/label/default triples for every tunable, one per
+# line. do_apply and screen_select built this identically, eight lines each.
+registry_checklist_rows() {
+    local id risk default
+    while read -r id; do
+        [[ -n $id ]] || continue
+        risk=${REG_RISK[$id]}
+        default=OFF
+        [[ $risk == low ]] && default=ON
+        printf '%s\n[%s] %s\n%s\n' "$id" "$risk" "${REG_TITLE[$id]}" "$default"
+    done < <(registry_tunables)
 }
 
 # APPLIED[id] = timestamp of the most recent run that applied that check and has
@@ -153,37 +202,41 @@ _field() {
 # why this host was flagged and what applying it costs. Same content the report
 # prints, gathered into one screen because the TUI clears the report away.
 review_text() {
-    local i
+    local id impact
     printf '%d change(s) apply to %s.\nReview, then choose which to make.\n' \
         "$#" "$(hostname)"
-    for i in "$@"; do
-        printf '\n%s  [%s]\n' "${C_ID[$i]}" "${C_RISK[$i]}"
-        _field 'Why:   ' "${C_WHY[$i]}"
-        [[ -n ${C_IMPACT[$i]} ]] && _field 'Effect:' "${C_IMPACT[$i]}"
+    for id in "$@"; do
+        printf '\n%s  [%s]\n' "$id" "$(registry_get "$id" risk)"
+        _field 'Why:   ' "$(registry_get "$id" why)"
+        impact=$(registry_get "$id" impact)
+        [[ -n $impact ]] && _field 'Effect:' "$impact"
     done
 }
 
 # --- report -----------------------------------------------------------------
 
 print_report() {
-    local i pending=0
+    local pending=0 id st impact
     printf '\n%spi-tune %s%s\n\n' "$C_BLD" "$PI_TUNE_VERSION" "$C_OFF"
     probe_summary | sed 's/^/  /'
     printf '\n  %sFindings%s\n\n' "$C_BLD" "$C_OFF"
 
-    for i in "${!C_ID[@]}"; do
-        [[ ${C_STATE[$i]} -eq 2 && $VERBOSE -eq 0 ]] && continue
-        printf '  [%b] %-26s %s\n' "$(state_label "${C_STATE[$i]}" "${C_ID[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
-        if [[ ${C_STATE[$i]} -eq 1 ]]; then
+    while read -r id; do
+        [[ -n $id ]] || continue
+        st=$(registry_state "$id")
+        [[ $st -eq 2 && $VERBOSE -eq 0 ]] && continue
+        printf '  [%b] %-26s %s\n' "$(state_label "$st" "$id")" "$id" "$(registry_get "$id" title)"
+        if [[ $st -eq 1 ]]; then
             printf '%s' "$C_DIM"
             {
-                _field 'Why:   ' "${C_WHY[$i]}"
-                [[ -n ${C_IMPACT[$i]} ]] && _field 'Effect:' "${C_IMPACT[$i]}"
+                _field 'Why:   ' "$(registry_get "$id" why)"
+                impact=$(registry_get "$id" impact)
+                [[ -n $impact ]] && _field 'Effect:' "$impact"
             } | sed 's/^/    /'
             printf '%s' "$C_OFF"
             pending=$((pending+1))
         fi
-    done
+    done < <(registry_ids)
 
     printf '\n  %d change(s) suggested.\n' "$pending"
     [[ $pending -gt 0 && $MODE == report ]] && \
@@ -230,16 +283,8 @@ health_verify() {
 
 do_apply() {
     local -a pending=() items=()
-    local i risk default
-
-    for i in "${!C_ID[@]}"; do
-        [[ ${C_STATE[$i]} -eq 1 ]] || continue
-        pending+=("$i")
-        risk="${C_RISK[$i]}"
-        default=OFF
-        [[ $risk == low ]] && default=ON
-        items+=("${C_ID[$i]}" "[$risk] ${C_TITLE[$i]}" "$default")
-    done
+    mapfile -t pending < <(registry_tunables)
+    mapfile -t items   < <(registry_checklist_rows)
 
     if [[ ${#pending[@]} -eq 0 ]]; then
         info "nothing to do — everything detected is already in good shape"
@@ -248,8 +293,9 @@ do_apply() {
 
     local -a chosen=()
     if [[ $ASSUME_YES -eq 1 ]]; then
-        for i in "${pending[@]}"; do
-            [[ ${C_RISK[$i]} == low ]] && chosen+=("${C_ID[$i]}")
+        local id
+        for id in "${pending[@]}"; do
+            [[ $(registry_get "$id" risk) == low ]] && chosen+=("$id")
         done
         info "--yes: selecting ${#chosen[@]} low-risk change(s)"
         [[ ${#chosen[@]} -eq 0 ]] && { info "nothing selected"; return 0; }
@@ -309,11 +355,11 @@ apply_ids() {
     new_backup_dir
     health_snapshot
 
-    local id idx rc applied=() run_dir=$BACKUP_DIR
+    local id rc applied=() run_dir=$BACKUP_DIR
     for id in "${chosen[@]}"; do
-        idx=$(index_of "$id") || continue
-        info "applying $id — ${C_TITLE[$idx]}"
-        load_check "${C_FILE[$idx]}" || continue
+        registry_has "$id" || continue
+        info "applying $id — $(registry_get "$id" title)"
+        load_check "$(registry_get "$id" file)" || continue
         # Recorded before the attempt: a module that fails halfway through has
         # still touched the system and must be reachable by --revert.
         [[ $DRY_RUN -eq 0 ]] && printf '%s\n' "$id" >> "$run_dir/applied.list"
@@ -413,12 +459,12 @@ _drifted() {
 # revert_hooks <dir> <hook> — run one revert hook for every id in applied.list,
 # re-sourcing its module first so the hook comes from the right file.
 revert_hooks() {
-    local dir=$1 hook=$2 id idx
+    local dir=$1 hook=$2 id
     [[ -f "$dir/applied.list" ]] || return 0
     while read -r id; do
         [[ -n $id ]] || continue
-        idx=$(index_of "$id") || continue
-        load_check "${C_FILE[$idx]}" || continue
+        registry_has "$id" || continue
+        load_check "$(registry_get "$id" file)" || continue
         dbg "$hook: $id"
         "$hook" || warn "$id $hook failed"
     done < "$dir/applied.list"
@@ -426,9 +472,8 @@ revert_hooks() {
 
 # _revert_hook <id> <hook> — one revert hook, from the right module file.
 _revert_hook() {
-    local idx
-    idx=$(index_of "$1") || return 0
-    load_check "${C_FILE[$idx]}" || return 0
+    registry_has "$1" || return 0
+    load_check "$(registry_get "$1" file)" || return 0
     dbg "$2: $1"
     "$2" || warn "$1 $2 failed"
 }
@@ -708,12 +753,13 @@ screen_host() {
 # behind -v; here there is room, and "pi-tune considered this and it does not
 # apply" is worth seeing before choosing anything.
 status_text() {
-    local i
+    local id
     printf 'Every tuning pi-tune knows, and where this host stands.\n\n'
-    for i in "${!C_ID[@]}"; do
+    while read -r id; do
+        [[ -n $id ]] || continue
         printf '  [%-4s] %-22s %s\n' \
-            "$(state_word "${C_STATE[$i]}" "${C_ID[$i]}")" "${C_ID[$i]}" "${C_TITLE[$i]}"
-    done
+            "$(state_word "$(registry_state "$id")" "$id")" "$id" "$(registry_get "$id" title)"
+    done < <(registry_ids)
     printf '\n  TUNE = can be applied     DONE = applied by pi-tune, undoable\n'
     printf '  OK   = already that way   N/A  = does not apply to this host\n'
 }
@@ -741,15 +787,8 @@ confirm_rows() {
 
 screen_select() {
     local -a pending=() items=()
-    local i risk default
-    for i in "${!C_ID[@]}"; do
-        [[ ${C_STATE[$i]} -eq 1 ]] || continue
-        pending+=("$i")
-        risk="${C_RISK[$i]}"
-        default=OFF
-        [[ $risk == low ]] && default=ON
-        items+=("${C_ID[$i]}" "[$risk] ${C_TITLE[$i]}" "$default")
-    done
+    mapfile -t pending < <(registry_tunables)
+    mapfile -t items   < <(registry_checklist_rows)
 
     if [[ ${#pending[@]} -eq 0 ]]; then
         ui_msgbox "Nothing to tune" \
@@ -862,8 +901,12 @@ screen_revert() {
         do_revert "$ts" ${byrun[$ts]}
     done
 
-    # Both the registry and the applied index are stale now.
+    # Both the registry and the applied index are stale now. Reloading the
+    # registry re-runs every detect, which is the point: a tune just undone must
+    # stop reading DONE on the status screen. This was impossible while the
+    # registry only appended - a second scan doubled every entry.
     applied_index
+    registry_load
     NEXT_SCREEN=host
 }
 
@@ -978,14 +1021,14 @@ main() {
     fi
 
     applied_index
-    scan_checks
+    registry_load
 
     case "$MODE" in
         list)
             local i
-            for i in "${!C_ID[@]}"; do
-                printf '%-26s %-8s %s\n' "${C_ID[$i]}" "[${C_RISK[$i]}]" "${C_TITLE[$i]}"
-            done
+            while read -r i; do
+                printf '%-26s %-8s %s\n' "$i" "[$(registry_get "$i" risk)]" "$(registry_get "$i" title)"
+            done < <(registry_ids)
             ;;
         report)
             print_report
@@ -1005,7 +1048,7 @@ main() {
         revert)
             [[ $EUID -eq 0 ]] || die "revert needs root"
             # --only narrows a revert to single tunes, the same way it narrows
-            # an apply. scan_checks has already been filtered by it, so the
+            # an apply. registry_load has already been filtered by it, so the
             # registry holds exactly the modules whose hooks should run.
             local -a rids=()
             [[ -n $ONLY ]] && IFS=',' read -ra rids <<< "$ONLY"

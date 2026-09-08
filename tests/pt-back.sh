@@ -24,7 +24,7 @@ BACKUP_ROOT="$root/backups"; DRY_RUN=0; VERBOSE=0; NO_TUI=1; ONLY=""; ASSUME_YES
 BACKUP_ROOT="$root/backups"; PI_MODEL="test"; DISTRO_PRETTY="test"; RAM_MB=1; CPU_COUNT=1
 ROOT_SRC=/dev/x; ROOT_FSTYPE=ext4; CRITICAL_UNITS=(); NEEDS_MANUAL=(); NEEDS_REBOOT=0
 unit_active() { return 0; }
-scan_checks
+registry_load
 
 # 1,2  -> select c1 and c2
 # n    -> Back

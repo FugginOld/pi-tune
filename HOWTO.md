@@ -279,6 +279,10 @@ Two rules earn their keep here:
   copy beside a guard. A copy needs a drift guard, and the obvious guard —
   counting the `ROOT_MEDIA=` lines — still passes when a medium is *renamed*,
   which is the one drift worth catching.
+- **Source the driver, don't rewrite it.** `pi-tune.sh` guards its entry point,
+  so a test sources it and calls its functions. Six tests used to `sed` the
+  `main "$@"` line into a temp copy first — a test surface made of a regex on
+  the file's last line, which one test had to assert had worked.
 
 `tests/.shellcheckrc` relaxes a handful of checks that are correct for the tool
 and wrong for a harness that sources it. It applies to `tests/` only; the tool's
