@@ -162,4 +162,53 @@ out=$(do_revert 20260101-000000 mod-a 2>&1); rc=$?
 chk "v1 rejects --only"       "$rc"                                        1
 chk "and says why"            "$(has x "$out" 'reverted whole')"           yes
 
+# --- 8. sysctl values are put back, not just the file -----------------------
+# Undoing zram-swap on pi3b-DNS1 removed /etc/sysctl.d/99-pi-tune-zram.conf and
+# left vm.swappiness=100 running. `sysctl --system` cannot help: once our file
+# is gone no file mentions the key. So the pre-values are recorded at write
+# time. Nothing here touches the real /etc - install_file and sysctl are stubs.
+sysctl() {
+    if [[ $1 == -n ]]; then
+        case $2 in
+            vm.swappiness)   echo 60 ;;
+            vm.page-cluster) echo 3 ;;
+            *) return 1 ;;
+        esac
+        return 0
+    fi
+    printf '%s\n' "$*" >> "$root/sysctl.log"
+    return 0
+}
+_real_install_file=$(declare -f install_file)
+install_file() { return 0; }
+
+BACKUP_DIR="$root/sysctlmod"; mkdir -p "$BACKUP_DIR"; DRY_RUN=0
+sysctl_drop_in 99-test.conf 'vm.swappiness=100' 'vm.page-cluster=0' >/dev/null 2>&1
+chk "records what was there"  "$(tr '\n' ' ' < "$BACKUP_DIR/sysctl.pre")" "vm.swappiness=60 vm.page-cluster=3 "
+# A key the kernel does not have must not be invented as empty - restoring
+# "=" later would be worse than leaving it alone.
+: > "$BACKUP_DIR/sysctl.pre"
+sysctl_drop_in 99-test.conf 'no.such.key=1' >/dev/null 2>&1
+chk "unknown key not recorded" "$(wc -l < "$BACKUP_DIR/sysctl.pre")" 0
+eval "$_real_install_file"
+
+# The revert side: a module carrying sysctl.pre must have those values applied.
+srun="$PI_TUNE_BACKUP_ROOT/20260303-000000"
+mkdir -p "$srun/modules/mod-sys"
+printf 'host=t\nschema=2\n' > "$srun/manifest"
+printf 'mod-sys\n' > "$srun/applied.list"
+printf 'vm.swappiness=60\n' > "$srun/modules/mod-sys/sysctl.pre"
+cat > "$PI_TUNE_CHECK_DIR/45-mod-sys.sh" <<'EOF'
+CHECK_ID="mod-sys"; CHECK_TITLE="module sys"; CHECK_RISK="low"
+check_detect() { return 0; }
+EOF
+C_ID=(); C_TITLE=(); C_RISK=(); C_FILE=(); C_WHY=(); C_IMPACT=(); C_STATE=()
+scan_checks
+: > "$root/sysctl.log"
+do_revert 20260303-000000 >/dev/null 2>&1
+chk "revert restores the value" "$(has x "$(cat "$root/sysctl.log" 2>/dev/null)" 'vm.swappiness=60')" yes
+# ...with -w, not --system, which would re-read files that no longer mention it.
+chk "restores by writing it"    "$(has x "$(cat "$root/sysctl.log" 2>/dev/null)" '-w vm.swappiness=60')" yes
+unset -f sysctl
+
 exit $fail

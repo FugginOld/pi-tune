@@ -577,6 +577,19 @@ _revert_v2() {
         fi
     done
 
+    # A drop-in this run created is simply gone now, and --system re-reads only
+    # what files still mention. The values recorded before the write are the
+    # only route back to what the kernel had.
+    local kv
+    for id in "${sel[@]}"; do
+        [[ -f "$dir/modules/$id/sysctl.pre" ]] || continue
+        while IFS= read -r kv; do
+            [[ -n $kv ]] || continue
+            info "restoring ${kv%%=*}"
+            run sysctl --quiet -w "$kv"
+        done < "$dir/modules/$id/sysctl.pre"
+    done
+
     # 4. undo that needs the ORIGINAL config back on disk.
     for id in "${sel[@]}"; do
         BACKUP_DIR="$dir/modules/$id"

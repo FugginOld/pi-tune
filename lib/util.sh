@@ -140,6 +140,20 @@ sysctl_drop_in() {
         echo "# written by pi-tune"
         printf '%s\n' "$@"
     } > "$tmp"
+    # What these keys read right now. Removing the drop-in on revert does not
+    # put them back: the kernel keeps the running value and, once our file is
+    # gone, no file mentions the key for `sysctl --system` to re-read. Undoing
+    # zram-swap on pi3b-DNS1 left vm.swappiness=100 behind exactly this way.
+    if [[ ${DRY_RUN:-0} -eq 0 && -d ${BACKUP_DIR:-} ]]; then
+        local kv key val
+        for kv in "$@"; do
+            key=${kv%%=*}
+            val=$(sysctl -n "$key" 2>/dev/null) || continue
+            printf '%s=%s
+' "$key" "$val" >> "$BACKUP_DIR/sysctl.pre"
+        done
+    fi
+
     install_file "$tmp" "/etc/sysctl.d/$name" 0644 || return 1
     run sysctl --quiet --system
 }
